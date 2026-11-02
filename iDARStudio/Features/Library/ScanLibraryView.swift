@@ -43,8 +43,17 @@ struct ScanLibraryView: View {
         case .loaded:
             List {
                 ForEach(library.scans) { scan in
-                    ScanRow(scan: scan)
+                    if let modelURL = library.modelURL(for: scan) {
+                        NavigationLink {
+                            USDZViewerView(modelURL: modelURL, title: scan.name)
+                        } label: {
+                            ScanRow(scan: scan)
+                        }
                         .listRowBackground(StudioTheme.surface)
+                    } else {
+                        ScanRow(scan: scan)
+                            .listRowBackground(StudioTheme.surface)
+                    }
                 }
                 .onDelete(perform: library.delete)
             }

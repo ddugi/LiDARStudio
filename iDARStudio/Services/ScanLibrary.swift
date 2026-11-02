@@ -46,6 +46,10 @@ final class ScanLibrary: ObservableObject {
         persist()
     }
 
+    func modelURL(for scan: ScanMetadata) -> URL? {
+        try? repository.modelURL(for: scan)
+    }
+
     private func persist() {
         do {
             try repository.save(scans)

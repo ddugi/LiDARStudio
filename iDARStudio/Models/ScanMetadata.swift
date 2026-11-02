@@ -25,7 +25,7 @@ nonisolated enum ScanKind: String, Codable, CaseIterable, Identifiable, Sendable
 }
 
 nonisolated struct ScanMetadata: Codable, Equatable, Identifiable, Sendable {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
 
     let id: UUID
     var name: String
@@ -33,8 +33,10 @@ nonisolated struct ScanMetadata: Codable, Equatable, Identifiable, Sendable {
     let createdAt: Date
     var updatedAt: Date
     var relativeModelPath: String?
+    var relativeCapturePath: String?
     var previewImagePath: String?
     var fileSizeBytes: Int64?
+    var photoCount: Int?
     let schemaVersion: Int
 
     init(
@@ -44,8 +46,10 @@ nonisolated struct ScanMetadata: Codable, Equatable, Identifiable, Sendable {
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         relativeModelPath: String? = nil,
+        relativeCapturePath: String? = nil,
         previewImagePath: String? = nil,
         fileSizeBytes: Int64? = nil,
+        photoCount: Int? = nil,
         schemaVersion: Int = currentSchemaVersion
     ) {
         self.id = id
@@ -54,8 +58,10 @@ nonisolated struct ScanMetadata: Codable, Equatable, Identifiable, Sendable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.relativeModelPath = relativeModelPath
+        self.relativeCapturePath = relativeCapturePath
         self.previewImagePath = previewImagePath
         self.fileSizeBytes = fileSizeBytes
+        self.photoCount = photoCount
         self.schemaVersion = schemaVersion
     }
 }
