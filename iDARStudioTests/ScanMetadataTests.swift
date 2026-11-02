@@ -5,8 +5,12 @@ import Testing
 struct ScanMetadataTests {
     @Test func objectStudioWorkflowRejectsOutOfOrderTransitions() {
         #expect(ObjectStudioTransitionPolicy.permits(from: .idle, to: .preparing))
+        #expect(ObjectStudioTransitionPolicy.permits(from: .preparing, to: .readyForDetection))
+        #expect(ObjectStudioTransitionPolicy.permits(from: .readyForDetection, to: .detecting))
+        #expect(ObjectStudioTransitionPolicy.permits(from: .readyForDetection, to: .capturing))
         #expect(ObjectStudioTransitionPolicy.permits(from: .preparing, to: .detecting))
         #expect(ObjectStudioTransitionPolicy.permits(from: .detecting, to: .capturing))
+        #expect(ObjectStudioTransitionPolicy.permits(from: .detecting, to: .readyForDetection))
         #expect(!ObjectStudioTransitionPolicy.permits(from: .idle, to: .capturing))
         #expect(!ObjectStudioTransitionPolicy.permits(from: .capturing, to: .reconstructing))
     }

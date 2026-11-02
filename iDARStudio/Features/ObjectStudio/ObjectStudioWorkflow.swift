@@ -5,6 +5,7 @@ nonisolated enum ObjectStudioPhase: Equatable, Sendable {
     case preparing
     case permissionRequired
     case unsupported(String)
+    case readyForDetection
     case detecting
     case capturing
     case finishing
@@ -16,7 +17,7 @@ nonisolated enum ObjectStudioPhase: Equatable, Sendable {
 
     var isCaptureSessionActive: Bool {
         switch self {
-        case .preparing, .detecting, .capturing, .finishing:
+        case .preparing, .readyForDetection, .detecting, .capturing, .finishing:
             true
         default:
             false
@@ -39,7 +40,11 @@ nonisolated enum ObjectStudioTransitionPolicy {
              (.completed, .preparing),
              (.preparing, .permissionRequired),
              (.preparing, .unsupported),
+             (.preparing, .readyForDetection),
+             (.readyForDetection, .detecting),
+             (.readyForDetection, .capturing),
              (.preparing, .detecting),
+             (.detecting, .readyForDetection),
              (.detecting, .capturing),
              (.capturing, .finishing),
              (.finishing, .reviewing),

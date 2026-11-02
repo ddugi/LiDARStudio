@@ -13,6 +13,7 @@ final class ObjectCaptureCoordinator: ObservableObject {
     @Published private(set) var maximumPhotoCount = 0
     @Published private(set) var canTakePhoto = false
     @Published private(set) var feedbackMessage: String?
+    @Published private(set) var detectionRecoveryMessage: String?
     @Published private(set) var reviewPhotoURLs: [URL] = []
     @Published private(set) var captureDraft: ObjectCaptureDraft?
     @Published private(set) var reconstructionProgress = 0.0
@@ -88,6 +89,7 @@ final class ObjectCaptureCoordinator: ObservableObject {
             maximumPhotoCount = newSession.maximumNumberOfInputImages
             canTakePhoto = false
             feedbackMessage = nil
+            detectionRecoveryMessage = nil
             reviewPhotoURLs = []
             session = newSession
             observe(newSession)
@@ -107,11 +109,27 @@ final class ObjectCaptureCoordinator: ObservableObject {
         transition(to: .capturing)
     }
 
+    func retryDetection() {
+        guard phase == .readyForDetection, let session else { return }
+        requestDetection(from: session, reason: "user retry")
+    }
+
+    func startFreeformCapture() {
+        guard phase == .readyForDetection,
+              let session,
+              session.state == .ready else { return }
+        detectionRecoveryMessage = nil
+        logger.info("Starting supported freeform capture from Object Capture ready state")
+        session.startCapturing()
+        transition(to: .capturing)
+    }
+
     func resetBoundingBox() {
         guard phase == .detecting, let session else { return }
         if session.resetDetection() {
-            didRequestDetection = session.startDetecting()
-            logger.info("Object detection reset")
+            didRequestDetection = false
+            detectionRecoveryMessage = nil
+            logger.info("Object detection reset; waiting for ready state")
         }
     }
 
@@ -252,25 +270,32 @@ final class ObjectCaptureCoordinator: ObservableObject {
                     guard !Task.isCancelled else { return }
                     self?.feedbackMessage = Self.message(for: feedback)
                 }
+            },
+            Task { [weak self, weak observedSession] in
+                guard let observedSession else { return }
+                for await tracking in observedSession.cameraTrackingUpdates {
+                    guard !Task.isCancelled else { return }
+                    self?.logCameraTracking(tracking, from: observedSession)
+                }
             }
         ]
     }
 
     private func handle(_ state: ObjectCaptureSession.CaptureState, from observedSession: ObjectCaptureSession) {
         guard session === observedSession else { return }
+        logger.info("Object Capture state changed to \(String(describing: state), privacy: .public)")
         switch state {
         case .initializing:
             break
         case .ready:
+            transition(to: .readyForDetection)
             guard !didRequestDetection else { return }
-            didRequestDetection = observedSession.startDetecting()
-            if !didRequestDetection {
-                cleanupSession(cancelFramework: true)
-                transition(to: .failed("Object detection could not be started."))
-            }
+            requestDetection(from: observedSession, reason: "automatic initial request")
         case .detecting:
+            detectionRecoveryMessage = nil
             transition(to: .detecting)
         case .capturing:
+            detectionRecoveryMessage = nil
             transition(to: .capturing)
         case .finishing:
             transition(to: .finishing)
@@ -279,12 +304,39 @@ final class ObjectCaptureCoordinator: ObservableObject {
             prepareReview()
             transition(to: .reviewing)
         case .failed(let error):
-            logger.error("Object capture failed: \(error.localizedDescription, privacy: .public)")
+            let frameworkError = error as NSError
+            logger.error("Object capture failed: domain=\(frameworkError.domain, privacy: .public) code=\(frameworkError.code, privacy: .public) description=\(error.localizedDescription, privacy: .public)")
             cleanupSession(cancelFramework: false)
             transition(to: .failed(error.localizedDescription))
         @unknown default:
             logger.error("Object Capture reported an unknown state")
         }
+    }
+
+    private func requestDetection(from observedSession: ObjectCaptureSession, reason: String) {
+        guard session === observedSession,
+              observedSession.state == .ready else {
+            logger.notice("Ignored object detection request because the session was not ready")
+            return
+        }
+
+        didRequestDetection = true
+        let started = observedSession.startDetecting()
+        let authorization = String(describing: AVCaptureDevice.authorizationStatus(for: .video))
+        logger.info("Object detection request (\(reason, privacy: .public)) returned \(started, privacy: .public); frameworkState=ready cameraAuthorization=\(authorization, privacy: .public)")
+        guard started else {
+            detectionRecoveryMessage = "No supporting surface is available at the center reticle yet. Aim at the surface beneath the object, then try detection again or continue without a box."
+            return
+        }
+        detectionRecoveryMessage = nil
+    }
+
+    private func logCameraTracking(
+        _ tracking: ObjectCaptureSession.Tracking,
+        from observedSession: ObjectCaptureSession
+    ) {
+        guard session === observedSession else { return }
+        logger.info("Object Capture camera tracking changed to \(String(describing: tracking), privacy: .public)")
     }
 
     private func cleanupSession(cancelFramework: Bool) {
@@ -298,6 +350,7 @@ final class ObjectCaptureCoordinator: ObservableObject {
         session = nil
         canTakePhoto = false
         feedbackMessage = nil
+        detectionRecoveryMessage = nil
         logger.debug("Object capture resources released")
     }
 

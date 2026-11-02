@@ -41,7 +41,7 @@ struct ObjectStudioView: View {
             VStack(spacing: 12) {
                 captureHeader
                 Spacer()
-                if let feedback = coordinator.feedbackMessage {
+                if let feedback = coordinator.detectionRecoveryMessage ?? coordinator.feedbackMessage {
                     Text(feedback)
                         .font(.subheadline.weight(.semibold))
                         .multilineTextAlignment(.center)
@@ -94,7 +94,15 @@ struct ObjectStudioView: View {
             .buttonStyle(.bordered)
             .accessibilityLabel("Cancel capture")
 
-            if coordinator.phase == .detecting {
+            if coordinator.phase == .readyForDetection {
+                Button("Try Detection", systemImage: "viewfinder", action: coordinator.retryDetection)
+                    .buttonStyle(.borderedProminent)
+                    .tint(StudioTheme.accent)
+                    .foregroundStyle(.black)
+                Button("Skip Box", systemImage: "arrow.right", action: coordinator.startFreeformCapture)
+                    .buttonStyle(.bordered)
+                    .accessibilityHint("Starts Apple's freeform object capture without a selection box")
+            } else if coordinator.phase == .detecting {
                 Button("Reset", systemImage: "arrow.counterclockwise", action: coordinator.resetBoundingBox)
                     .buttonStyle(.bordered)
                 Button("Use Box", systemImage: "checkmark", action: coordinator.confirmBoundingBox)
@@ -337,6 +345,7 @@ struct ObjectStudioView: View {
     private var captureInstruction: String {
         switch coordinator.phase {
         case .preparing: "Preparing camera…"
+        case .readyForDetection: "Center the reticle on the surface beneath the object."
         case .detecting: "Adjust the box to fit only the object, then confirm."
         case .capturing: "Move slowly around the object and photograph new angles."
         case .finishing: "Saving photographs…"
