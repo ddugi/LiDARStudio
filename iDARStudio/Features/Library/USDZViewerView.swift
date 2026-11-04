@@ -4,20 +4,30 @@ import SwiftUI
 nonisolated struct ModelFileInfo: Equatable, Sendable {
     let fileName: String
     let sizeBytes: Int64
+    let modifiedAt: Date?
 
     static func inspect(_ url: URL) throws -> ModelFileInfo {
         guard url.pathExtension.lowercased() == "usdz",
               FileManager.default.fileExists(atPath: url.path) else {
             throw ModelFileError.missing
         }
-        let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
+        let values = try url.resourceValues(forKeys: [
+            .fileSizeKey,
+            .isRegularFileKey,
+            .isSymbolicLinkKey,
+            .contentModificationDateKey
+        ])
         guard values.isRegularFile == true, values.isSymbolicLink != true else { throw ModelFileError.invalid }
         let size = Int64(values.fileSize ?? 0)
         guard size >= 64 else { throw ModelFileError.invalid }
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         guard try handle.read(upToCount: 4) == Data([0x50, 0x4B, 0x03, 0x04]) else { throw ModelFileError.invalid }
-        return ModelFileInfo(fileName: url.lastPathComponent, sizeBytes: size)
+        return ModelFileInfo(
+            fileName: url.lastPathComponent,
+            sizeBytes: size,
+            modifiedAt: values.contentModificationDate
+        )
     }
 }
 
@@ -51,7 +61,22 @@ struct USDZViewerView: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .task { result = Result { try ModelFileInfo.inspect(modelURL) } }
+        .toolbar {
+            if case .some(.success) = result {
+                ToolbarItem(placement: .topBarTrailing) {
+                    ShareLink(item: modelURL) {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .accessibilityLabel("Share or export model")
+                }
+            }
+        }
+        .task(id: modelURL) {
+            result = nil
+            result = await Task.detached(priority: .utility) {
+                Result { try ModelFileInfo.inspect(modelURL) }
+            }.value
+        }
     }
 
     private func viewer(_ info: ModelFileInfo) -> some View {

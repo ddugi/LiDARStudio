@@ -6,6 +6,9 @@ struct ScanLibraryView: View {
     @State private var searchText = ""
     @State private var sortOrder: ScanSortOrder = .newest
     @State private var favoritesOnly = false
+    @AppStorage("scanLibraryPresentation") private var presentation = ScanLibraryPresentation.grid
+    @State private var scanToRename: ScanMetadata?
+    @State private var proposedName = ""
 
     private var visibleScans: [ScanMetadata] {
         ScanQuery.results(
@@ -24,6 +27,18 @@ struct ScanLibraryView: View {
         .navigationTitle("My Scans")
         .searchable(text: $searchText, prompt: "Search scans")
         .toolbar { libraryToolbar }
+        .alert("Rename Scan", isPresented: renameBinding) {
+            TextField("Scan name", text: $proposedName)
+            Button("Cancel", role: .cancel) { scanToRename = nil }
+            Button("Rename") {
+                if let scanToRename {
+                    _ = library.rename(scanToRename, to: proposedName)
+                }
+                scanToRename = nil
+            }
+        } message: {
+            Text("Choose a name stored in this scan's local metadata.")
+        }
         .alert("Library action failed", isPresented: errorBinding) {
             Button("OK") { library.clearOperationError() }
         } message: {
@@ -40,6 +55,12 @@ struct ScanLibraryView: View {
         } else {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    Picker("Layout", selection: $presentation) {
+                        ForEach(ScanLibraryPresentation.allCases) { option in
+                            Label(option.title, systemImage: option.systemImage).tag(option)
+                        }
+                    }
+                    Divider()
                     Picker("Sort", selection: $sortOrder) {
                         ForEach(ScanSortOrder.allCases) { order in Text(order.title).tag(order) }
                     }
@@ -80,21 +101,14 @@ struct ScanLibraryView: View {
             ContentUnavailableView.search(text: searchText.isEmpty ? "Favorites" : searchText)
         case .loaded:
             ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 156), spacing: 12)], spacing: 12) {
-                    ForEach(visibleScans) { scan in
-                        NavigationLink { ScanDetailView(scanID: scan.id) } label: {
-                            ScanCard(
-                                scan: scan,
-                                previewURL: library.previewURL(for: scan),
-                                modelAvailable: library.modelURL(for: scan) != nil
-                            )
+                Group {
+                    if presentation == .grid {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 156), spacing: 12)], spacing: 12) {
+                            ForEach(visibleScans) { scan in scanLink(scan, style: .grid) }
                         }
-                        .contextMenu {
-                            Button {
-                                library.toggleFavorite(scan)
-                            } label: {
-                                Label(scan.isFavorite ? "Remove Favorite" : "Favorite", systemImage: scan.isFavorite ? "star.slash" : "star")
-                            }
+                    } else {
+                        LazyVStack(spacing: 10) {
+                            ForEach(visibleScans) { scan in scanLink(scan, style: .list) }
                         }
                     }
                 }
@@ -107,38 +121,80 @@ struct ScanLibraryView: View {
     private var errorBinding: Binding<Bool> {
         Binding(get: { library.operationError != nil }, set: { if !$0 { library.clearOperationError() } })
     }
-}
 
-struct ScanThumbnail: View {
-    let url: URL?
-    let kind: ScanKind
+    private var renameBinding: Binding<Bool> {
+        Binding(
+            get: { scanToRename != nil },
+            set: { if !$0 { scanToRename = nil } }
+        )
+    }
 
-    var body: some View {
-        Group {
-            if let url, let image = UIImage(contentsOfFile: url.path) {
-                Image(uiImage: image).resizable().scaledToFill()
+    @ViewBuilder
+    private func scanLink(_ scan: ScanMetadata, style: ScanCardStyle) -> some View {
+        let modelURL = library.modelURL(for: scan)
+        NavigationLink { ScanDetailView(scanID: scan.id) } label: {
+            if style == .grid {
+                ScanCard(
+                    scan: scan,
+                    previewURL: library.previewURL(for: scan),
+                    modelURL: modelURL
+                )
             } else {
-                ZStack {
-                    LinearGradient(colors: [StudioTheme.elevatedSurface, StudioTheme.surface], startPoint: .topLeading, endPoint: .bottomTrailing)
-                    Image(systemName: kind.systemImage)
-                        .font(.system(size: 34, weight: .light))
-                        .foregroundStyle(StudioTheme.accent)
+                ScanListRow(
+                    scan: scan,
+                    previewURL: library.previewURL(for: scan),
+                    modelURL: modelURL
+                )
+            }
+        }
+        .contextMenu {
+            Button {
+                library.toggleFavorite(scan)
+            } label: {
+                Label(
+                    scan.isFavorite ? "Remove Favorite" : "Favorite",
+                    systemImage: scan.isFavorite ? "star.slash" : "star"
+                )
+            }
+            Button {
+                proposedName = scan.name
+                scanToRename = scan
+            } label: {
+                Label("Rename", systemImage: "pencil")
+            }
+            if let modelURL {
+                ShareLink(item: modelURL) {
+                    Label("Share / Export", systemImage: "square.and.arrow.up")
                 }
             }
         }
-        .clipped()
-        .accessibilityHidden(true)
     }
 }
+
+nonisolated enum ScanLibraryPresentation: String, CaseIterable, Identifiable, Sendable {
+    case grid
+    case list
+
+    var id: String { rawValue }
+    var title: String { self == .grid ? "Grid" : "List" }
+    var systemImage: String { self == .grid ? "square.grid.2x2" : "list.bullet" }
+}
+
+private enum ScanCardStyle { case grid, list }
 
 private struct ScanCard: View {
     let scan: ScanMetadata
     let previewURL: URL?
-    let modelAvailable: Bool
+    let modelURL: URL?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ScanThumbnail(url: previewURL, kind: scan.kind)
+            ModelThumbnailView(
+                scanID: scan.id,
+                previewURL: previewURL,
+                modelURL: modelURL,
+                kind: scan.kind
+            )
                 .frame(height: 118)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .overlay(alignment: .topTrailing) {
@@ -153,11 +209,57 @@ private struct ScanCard: View {
             Text(scan.name).font(.headline).foregroundStyle(.white).lineLimit(1)
             Text(scan.updatedAt.formatted(date: .abbreviated, time: .omitted))
                 .font(.caption).foregroundStyle(StudioTheme.secondaryText)
-            Label(modelAvailable ? "USDZ available" : "Model unavailable", systemImage: modelAvailable ? "checkmark.circle.fill" : "exclamationmark.circle")
+            Label(modelURL != nil ? "USDZ available" : "Model unavailable", systemImage: modelURL != nil ? "checkmark.circle.fill" : "exclamationmark.circle")
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(modelAvailable ? StudioTheme.accent : StudioTheme.warning)
+                .foregroundStyle(modelURL != nil ? StudioTheme.accent : StudioTheme.warning)
                 .lineLimit(1)
         }
+        .padding(12)
+        .background(StudioTheme.surface, in: RoundedRectangle(cornerRadius: 18))
+        .overlay { RoundedRectangle(cornerRadius: 18).stroke(StudioTheme.border) }
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens scan details")
+    }
+}
+
+private struct ScanListRow: View {
+    let scan: ScanMetadata
+    let previewURL: URL?
+    let modelURL: URL?
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ModelThumbnailView(
+                scanID: scan.id,
+                previewURL: previewURL,
+                modelURL: modelURL,
+                kind: scan.kind,
+                maximumPixelSize: 240
+            )
+            .frame(width: 92, height: 92)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Text(scan.name).font(.headline).lineLimit(1)
+                    if scan.isFavorite {
+                        Image(systemName: "star.fill").foregroundStyle(StudioTheme.accent)
+                    }
+                }
+                Text(scan.kind.title + " · " + scan.createdAt.formatted(date: .abbreviated, time: .omitted))
+                    .font(.caption)
+                    .foregroundStyle(StudioTheme.secondaryText)
+                Label(
+                    modelURL != nil ? "USDZ available" : "Model unavailable",
+                    systemImage: modelURL != nil ? "checkmark.circle.fill" : "exclamationmark.circle"
+                )
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(modelURL != nil ? StudioTheme.accent : StudioTheme.warning)
+            }
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.right").foregroundStyle(StudioTheme.secondaryText)
+        }
+        .foregroundStyle(.white)
         .padding(12)
         .background(StudioTheme.surface, in: RoundedRectangle(cornerRadius: 18))
         .overlay { RoundedRectangle(cornerRadius: 18).stroke(StudioTheme.border) }

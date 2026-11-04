@@ -27,6 +27,55 @@ struct ProductExperienceTests {
         #expect(ScanQuery.results(from: [old, new], searchText: "", sortOrder: .newest, favoritesOnly: true) == [old])
     }
 
+    @Test func dateSortUsesCreationDateRatherThanLaterMetadataEdits() {
+        let createdFirstButEditedLater = ScanMetadata(
+            name: "Older",
+            kind: .object,
+            createdAt: Date(timeIntervalSince1970: 100),
+            updatedAt: Date(timeIntervalSince1970: 900)
+        )
+        let createdLater = ScanMetadata(
+            name: "Newer",
+            kind: .object,
+            createdAt: Date(timeIntervalSince1970: 200),
+            updatedAt: Date(timeIntervalSince1970: 300)
+        )
+
+        #expect(ScanQuery.results(
+            from: [createdFirstButEditedLater, createdLater],
+            searchText: "",
+            sortOrder: .newest
+        ) == [createdLater, createdFirstButEditedLater])
+    }
+
+    @Test func modelThumbnailCacheReusesFreshDataAndRejectsStaleData() throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let models = root.appending(path: "Models", directoryHint: .isDirectory)
+        let cacheRoot = root.appending(path: "Thumbnails", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: models, withIntermediateDirectories: true)
+        let modelURL = models.appending(path: "model.usdz")
+        try validUSDZData().write(to: modelURL)
+        let scanID = UUID()
+        let cache = ModelThumbnailCache(directory: cacheRoot)
+        let thumbnailData = Data([0x89, 0x50, 0x4E, 0x47])
+
+        try cache.store(thumbnailData, scanID: scanID, maximumPixelSize: 480)
+        #expect(cache.validCachedData(
+            for: modelURL,
+            scanID: scanID,
+            maximumPixelSize: 480
+        ) == thumbnailData)
+
+        let future = Date().addingTimeInterval(10)
+        try FileManager.default.setAttributes([.modificationDate: future], ofItemAtPath: modelURL.path)
+        #expect(cache.validCachedData(
+            for: modelURL,
+            scanID: scanID,
+            maximumPixelSize: 480
+        ) == nil)
+    }
+
     @Test @MainActor func libraryRenameFavoriteAndRestartPersist() throws {
         let root = temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }

@@ -122,13 +122,13 @@ nonisolated enum ScanQuery {
         return filtered.sorted { lhs, rhs in
             switch sortOrder {
             case .newest:
-                lhs.updatedAt == rhs.updatedAt
+                lhs.createdAt == rhs.createdAt
                     ? lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
-                    : lhs.updatedAt > rhs.updatedAt
+                    : lhs.createdAt > rhs.createdAt
             case .oldest:
-                lhs.updatedAt == rhs.updatedAt
+                lhs.createdAt == rhs.createdAt
                     ? lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
-                    : lhs.updatedAt < rhs.updatedAt
+                    : lhs.createdAt < rhs.createdAt
             case .name:
                 lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
             }
