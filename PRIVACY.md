@@ -37,11 +37,12 @@ Capture drafts and original photographs are intentionally preserved so a failed
 reconstruction does not silently destroy user work. App restarts preserve local
 metadata and completed artifacts.
 
-The current My Scans delete action removes library metadata only. It does not
-yet guarantee removal of associated models, original photographs, checkpoints,
-or RGB-D datasets. Until a verified erase workflow exists, users who require
-complete removal should delete the application and its data through iOS after
-exporting anything they wish to keep.
+My Scans removes data only after the user confirms the destructive action. The
+selected scan's validated model, preview, capture workspace, original
+photographs, checkpoints, and metadata are then removed from the app container.
+Independent RGB-D diagnostic datasets are not scan-library entries and are not
+removed by deleting a scan. Deleting the application through iOS removes the
+entire app container, including independent diagnostic data.
 
 ## Logs
 

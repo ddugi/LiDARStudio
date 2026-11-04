@@ -5,6 +5,19 @@ work, not App Store releases.
 
 ## Unreleased
 
+### Product experience
+
+- Added a repository-driven home dashboard with real scan counts, recent
+  projects, and device capability status.
+- Added first-launch onboarding and practical settings for storage, hardware,
+  permissions, diagnostics, version, privacy, and ownership.
+- Added library search, sorting, favorites, scan details, rename, explicit
+  confirmed deletion, preview support, sharing, and resilient empty/error states.
+- Added preflight validation and model information to the native Quick Look USDZ
+  viewer.
+- Added automated coverage for repository CRUD, metadata migration, library
+  operations, file validation, navigation, and empty/error states.
+
 ### Documentation and governance
 
 - Added current-state application architecture and architecture decisions.
@@ -49,5 +62,3 @@ work, not App Store releases.
 - Object Capture detection is blocked by a reproduced RealityKit Metal
   assertion on the tested platform.
 - ARKit normal tracking and live scene depth are not yet verified.
-- Three local repository tests expose an unresolved iOS path-normalization
-  regression.

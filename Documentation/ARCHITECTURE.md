@@ -22,6 +22,7 @@ flowchart TD
     Home --> Room[Room Studio]
     Home --> Environment[Environment Studio]
     Home --> Library[My Scans]
+    Home --> Settings[Settings]
     Home --> About[About]
 
     Object --> OC[ObjectCaptureCoordinator]
@@ -45,6 +46,8 @@ flowchart TD
   environment.
 - `ContentView` owns the root `NavigationStack` and forwards background scene
   transitions to `ScreenAwakeManager`.
+- `AppNavigationState` owns typed top-level destinations. First-launch
+  onboarding is presentation state only and never starts a camera session.
 - Each studio is a feature boundary. Object Studio and Environment Studio own
   separate coordinators; Room Studio currently exposes only foundation UI and
   capability status.
@@ -135,6 +138,8 @@ Documents/LiDARStudio/
 ├── scans.json
 ├── Models/
 │   └── <UUID>.usdz
+├── Previews/
+│   └── <filename>
 └── Captures/
     └── <UUID>/
         ├── capture.json
@@ -151,13 +156,19 @@ Application Support/RGBDDatasets/<UUID>/
 └── frames/
 ```
 
-`LocalScanRepository` rejects escaping model paths, symbolic links, empty files,
-non-USDZ extensions, and files without the ZIP/USDZ container signature.
-Metadata writes are atomic and versioned through `ScanMetadata.schemaVersion`.
+`LocalScanRepository` rejects escaping model, preview, and capture paths. Model
+opening rejects symbolic links, empty files, non-USDZ extensions, and files
+without the ZIP/USDZ container signature. Metadata writes are atomic and
+versioned through `ScanMetadata.schemaVersion`.
 
-The current library delete action removes metadata from `scans.json`; it is not
-yet a comprehensive secure erasure flow for associated capture directories and
-model files. See `PRIVACY.md` and `Documentation/KNOWN_ISSUES.md`.
+Library deletion is available only after explicit destructive confirmation. It
+validates every referenced local path, persists the remaining metadata, then
+removes the selected model, preview, and capture directory. Rename, favorites,
+search, and sorting operate on real persisted metadata.
+
+Quick Look provides Apple's native USDZ interaction. `ModelFileInfo` validates
+the local model before presentation, and sharing is an explicit system Share
+Sheet action.
 
 ## Screen-awake lifecycle
 

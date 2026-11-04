@@ -10,10 +10,16 @@ nonisolated struct LocalScanRepository: Sendable {
 
     enum RepositoryError: LocalizedError {
         case invalidModelPath
+        case invalidCapturePath
+        case invalidPreviewPath
+        case invalidScanName
 
         var errorDescription: String? {
             switch self {
             case .invalidModelPath: "A scan referenced a file outside the local scan library."
+            case .invalidCapturePath: "A scan referenced a capture outside the local scan library."
+            case .invalidPreviewPath: "A scan referenced a preview outside the local scan library."
+            case .invalidScanName: "Enter a scan name containing at least one visible character."
             }
         }
     }
@@ -37,6 +43,10 @@ nonisolated struct LocalScanRepository: Sendable {
         rootDirectory.appending(path: "Captures", directoryHint: .isDirectory)
     }
 
+    var previewsDirectory: URL {
+        rootDirectory.appending(path: "Previews", directoryHint: .isDirectory)
+    }
+
     private var metadataFile: URL {
         rootDirectory.appending(path: "scans.json")
     }
@@ -44,6 +54,7 @@ nonisolated struct LocalScanRepository: Sendable {
     func prepareDirectories() throws {
         try FileManager.default.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: capturesDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: previewsDirectory, withIntermediateDirectories: true)
     }
 
     func createObjectCaptureWorkspace(id: UUID) throws -> ObjectCaptureWorkspace {
@@ -136,6 +147,47 @@ nonisolated struct LocalScanRepository: Sendable {
         return resolved
     }
 
+    func existingPreviewURL(for scan: ScanMetadata) throws -> URL? {
+        guard let relativePath = scan.previewImagePath else { return nil }
+        let resolved = try secureFileURL(relativePath: relativePath, inside: previewsDirectory, error: .invalidPreviewPath)
+        guard FileManager.default.fileExists(atPath: resolved.path) else { return nil }
+        let values = try resolved.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true else { return nil }
+        return resolved
+    }
+
+    func storageUsageBytes() throws -> Int64 {
+        try prepareDirectories()
+        guard let enumerator = FileManager.default.enumerator(
+            at: rootDirectory,
+            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return 0 }
+
+        var total: Int64 = 0
+        for case let url as URL in enumerator {
+            let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
+            if values.isRegularFile == true, values.isSymbolicLink != true {
+                total += Int64(values.fileSize ?? 0)
+            }
+        }
+        return total
+    }
+
+    func delete(_ scan: ScanMetadata, keeping remainingScans: [ScanMetadata]) throws {
+        let modelURL = try modelURL(for: scan)
+        let previewURL = try existingPreviewURL(for: scan)
+        let captureURL = try captureDirectory(for: scan)
+
+        try save(remainingScans)
+
+        for url in [modelURL, previewURL, captureURL].compactMap({ $0 }) {
+            if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
+        }
+    }
+
     func load() throws -> [ScanMetadata] {
         try prepareDirectories()
         guard FileManager.default.fileExists(atPath: metadataFile.path) else { return [] }
@@ -147,7 +199,14 @@ nonisolated struct LocalScanRepository: Sendable {
     func save(_ scans: [ScanMetadata]) throws {
         try prepareDirectories()
         for scan in scans {
+            guard !scan.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw RepositoryError.invalidScanName
+            }
             _ = try modelURL(for: scan)
+            if let preview = scan.previewImagePath {
+                _ = try secureFileURL(relativePath: preview, inside: previewsDirectory, error: .invalidPreviewPath)
+            }
+            _ = try captureDirectory(for: scan)
         }
         let data = try Self.encoder.encode(scans)
         try data.write(to: metadataFile, options: .atomic)
@@ -170,5 +229,26 @@ nonisolated struct LocalScanRepository: Sendable {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         return try handle.read(upToCount: 4) == Data([0x50, 0x4B, 0x03, 0x04])
+    }
+
+    private func captureDirectory(for scan: ScanMetadata) throws -> URL? {
+        guard let relativePath = scan.relativeCapturePath else { return nil }
+        return try secureFileURL(relativePath: relativePath, inside: capturesDirectory, error: .invalidCapturePath)
+    }
+
+    private func secureFileURL(
+        relativePath: String,
+        inside directory: URL,
+        error: RepositoryError
+    ) throws -> URL {
+        guard !relativePath.isEmpty,
+              relativePath == URL(fileURLWithPath: relativePath).lastPathComponent,
+              !relativePath.contains("/"),
+              !relativePath.contains("\\") else {
+            throw error
+        }
+        let resolved = directory.appending(path: relativePath).standardizedFileURL
+        guard resolved.deletingLastPathComponent() == directory.standardizedFileURL else { throw error }
+        return resolved
     }
 }

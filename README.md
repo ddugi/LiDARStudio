@@ -20,7 +20,7 @@ LiDARStudio 2.0 product effort; the current app marketing version remains
 | Object photogrammetry and USDZ workflow | Yes | End-to-end textured reconstruction is not yet verified on the target device |
 | Room Studio | Foundation UI and capability check | Scanner integration not complete |
 | Environment Studio | Isolated ARKit diagnostics and bounded RGB-D recorder | ARFrame callbacks observed; normal tracking and live depth remain unverified |
-| My Scans | Local metadata, USDZ validation, viewer, and sharing | Three repository tests currently expose an iOS path-normalization regression |
+| My Scans | Searchable local library, favorites, rename, confirmed deletion, validated USDZ viewer, and sharing | Non-capture workflow implemented; manual device UX validation pending |
 
 See [Known Issues](Documentation/KNOWN_ISSUES.md) before interpreting any
 hardware-dependent feature as complete.
