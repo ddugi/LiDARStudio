@@ -48,6 +48,15 @@ struct ScanLibraryView: View {
 
     @ToolbarContentBuilder
     private var libraryToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            NavigationLink {
+                ScanRecoveryCenterView()
+            } label: {
+                Image(systemName: "archivebox")
+            }
+            .accessibilityLabel("Open Scan Recovery Center")
+            .accessibilityHint("Inspects unindexed models and capture drafts without changing them")
+        }
         if case .failed = library.state {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Retry", systemImage: "arrow.clockwise", action: library.reload)

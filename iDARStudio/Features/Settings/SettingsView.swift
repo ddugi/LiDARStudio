@@ -51,10 +51,15 @@ struct SettingsView: View {
         Section("Local Storage") {
             LabeledContent("Total managed data", value: formatted(storageBreakdown?.totalBytes))
             storageRow("Models", bytes: storageBreakdown?.modelsBytes, symbol: "cube.transparent")
-            storageRow("Capture photographs", bytes: storageBreakdown?.capturePhotographsBytes, symbol: "photo.stack")
+            storageRow("Original photographs", bytes: storageBreakdown?.capturePhotographsBytes, symbol: "photo.stack")
+            storageRow("Capture checkpoints", bytes: storageBreakdown?.captureCheckpointsBytes, symbol: "camera.metering.matrix")
+            storageRow("Reconstruction intermediates", bytes: storageBreakdown?.reconstructionIntermediatesBytes, symbol: "square.3.layers.3d")
             storageRow("Previews", bytes: storageBreakdown?.previewsBytes, symbol: "photo")
+            storageRow("Metadata", bytes: storageBreakdown?.metadataBytes, symbol: "doc.text")
             storageRow("Diagnostic datasets", bytes: storageBreakdown?.diagnosticDatasetsBytes, symbol: "waveform.path.ecg")
-            storageRow("Metadata & checkpoints", bytes: storageBreakdown?.otherScanDataBytes, symbol: "doc.text")
+            if let other = storageBreakdown?.otherManagedDataBytes, other > 0 {
+                storageRow("Other managed data", bytes: other, symbol: "questionmark.folder")
+            }
             Text("Counts regular local files only. Symbolic links are excluded, and private filesystem paths are never displayed.")
                 .font(.caption)
                 .foregroundStyle(StudioTheme.secondaryText)
