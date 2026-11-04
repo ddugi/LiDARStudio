@@ -21,6 +21,18 @@ and RGB-D dataset structure. They do not prove camera delivery, LiDAR depth,
 tracking quality, texture fidelity, reconstruction accuracy, thermal stability,
 or framework crash freedom.
 
+## Public CI
+
+The `iOS CI` GitHub Actions workflow runs an unsigned simulator build on the
+official `xcode-27` runner for pull requests and pushes to `main`. It has
+read-only repository permissions and receives no signing credentials.
+
+The required check is named `iOS Simulator Build`. It verifies compilation and
+linking only. The full automated test suite is not yet a required CI check
+because three repository path-normalization tests are known to fail on the
+current development line. Those failures remain visible in Known Issues and
+must be corrected before tests become required.
+
 ## Hardware test record
 
 Every physical test report must record:

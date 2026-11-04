@@ -11,6 +11,8 @@ work, not App Store releases.
 - Added known-issues, testing, privacy, and security policies.
 - Added GitHub ownership and structured issue templates.
 - Expanded README status, requirements, build instructions, and document index.
+- Added an unsigned Xcode 27 simulator-build workflow for pull requests and
+  protected `main` updates.
 
 ## 0.1.0 development line
 

@@ -1,5 +1,7 @@
 # LiDARStudio
 
+[![iOS CI](https://github.com/ddugi/LiDARStudio/actions/workflows/ios-ci.yml/badge.svg?branch=main)](https://github.com/ddugi/LiDARStudio/actions/workflows/ios-ci.yml)
+
 LiDARStudio is a native SwiftUI research and development application for local
 3D scanning workflows on supported Apple devices. The project separates Object
 Capture, RoomPlan, ARKit environment diagnostics, and the local scan library.
@@ -51,6 +53,10 @@ xcodebuild \
 Run automated tests on an unlocked configured device by replacing `build` with
 `test`. Hardware behavior must be validated separately; automated tests do not
 simulate camera, LiDAR, Object Capture, or photogrammetry success.
+
+Public CI uses GitHub's `xcode-27` runner to compile an unsigned iOS Simulator
+application. The required CI check proves buildability only; it does not use
+signing credentials and does not claim physical camera or LiDAR verification.
 
 ## Architecture and documentation
 

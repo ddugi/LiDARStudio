@@ -94,8 +94,9 @@ erasure.
   saved environment reconstruction workflow.
 - End-to-end textured USDZ production, persistence, reopen, and sharing have not
   completed a stable representative physical-device acceptance run.
-- CI is not configured. Xcode 27 runner availability and unsigned simulator
-  compatibility must be verified before adding a public workflow.
+- Public CI performs an unsigned simulator build on GitHub's `xcode-27` runner.
+  The full test suite is not required until the three repository test failures
+  are corrected.
 - Product naming says LiDARStudio 2.0 while `MARKETING_VERSION` remains `0.1.0`.
   Version changes require an explicit release decision.
 
