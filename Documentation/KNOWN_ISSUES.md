@@ -65,28 +65,6 @@ samples because neither `sceneDepth` nor `smoothedSceneDepth` was present:
 The empty manifest was correctly rejected. No dataset success is claimed.
 Depth and recording tests must not resume until Basic tracking reaches normal.
 
-## P1 — Local repository URL normalization tests
-
-Status: **three automated failures; implementation investigation pending**.
-
-The last complete physical-device suite passed 27 of 30 tests. These tests fail
-because equivalent iOS container paths may compare as `/private/var/...` and
-`/var/...`:
-
-- `metadataRoundTripsThroughLocalRepository`
-- `libraryMetadataSurvivesAppStyleReload`
-- `libraryOnlyOpensAnExistingNonemptyUSDZ`
-
-All four RGB-D structural validation tests passed. Do not weaken path traversal
-or USDZ validation merely to make the failing expectations pass.
-
-## P1 — Library deletion is metadata-only
-
-Deleting a scan from `ScanLibrary` removes its metadata entry. It does not yet
-guarantee deletion of the related USDZ, original photographs, capture draft,
-checkpoints, or RGB-D dataset. No UI should describe this as complete or secure
-erasure.
-
 ## Incomplete product areas
 
 - Room Studio has capability UI but no integrated RoomPlan capture engine.
@@ -95,8 +73,8 @@ erasure.
 - End-to-end textured USDZ production, persistence, reopen, and sharing have not
   completed a stable representative physical-device acceptance run.
 - Public CI performs an unsigned simulator build on GitHub's `xcode-27` runner.
-  The full test suite is not required until the three repository test failures
-  are corrected.
+  The locally passing full test suite is not yet executed by the required
+  hosted CI check.
 - Product naming says LiDARStudio 2.0 while `MARKETING_VERSION` remains `0.1.0`.
   Version changes require an explicit release decision.
 

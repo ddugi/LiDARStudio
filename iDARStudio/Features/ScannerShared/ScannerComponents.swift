@@ -49,7 +49,7 @@ struct ScannerFoundationView: View {
         guard hardwareSupported else { return .unavailable(unavailableMessage) }
         switch permission {
         case .authorized:
-            return .ready("This studio is supported. Capture integration will be delivered and device-verified in a later sprint.")
+            return .ready("The required public API and camera permission are available. Capture integration still requires implementation and physical-device verification.")
         case .notDetermined:
             return .permissionRequired("Allow camera access before starting a scan.")
         case .denied:
@@ -70,8 +70,7 @@ struct ScannerFoundationView: View {
                         .font(.title3)
                         .foregroundStyle(StudioTheme.secondaryText)
                     readinessCard
-                    ScanControlBar(isEnabled: false)
-                    Text("Sprint 1 provides capability checks, permissions, navigation, controls, and local storage. It does not start a camera or scanning session.")
+                    Text("This screen verifies public API availability and camera permission only. It does not start a session or claim that room capture is integrated.")
                         .font(.footnote)
                         .foregroundStyle(StudioTheme.secondaryText)
                         .studioCard()

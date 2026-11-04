@@ -1,6 +1,8 @@
 import ARKit
 import AVFoundation
 import RoomPlan
+import RealityKit
+import SwiftUI
 
 nonisolated struct DeviceCapabilities: Equatable, Sendable {
     let hasCamera: Bool
@@ -8,8 +10,8 @@ nonisolated struct DeviceCapabilities: Equatable, Sendable {
     let supportsSceneDepth: Bool
     let supportsLiDARMesh: Bool
     let supportsRoomPlan: Bool
-
-    var supportsObjectCapture: Bool { hasCamera }
+    let supportsObjectCapture: Bool
+    let supportsOnDevicePhotogrammetry: Bool
 }
 
 enum DeviceCapabilityService {
@@ -20,7 +22,9 @@ enum DeviceCapabilityService {
             supportsWorldTracking: ARWorldTrackingConfiguration.isSupported,
             supportsSceneDepth: ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth),
             supportsLiDARMesh: ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh),
-            supportsRoomPlan: RoomCaptureSession.isSupported
+            supportsRoomPlan: RoomCaptureSession.isSupported,
+            supportsObjectCapture: ObjectCaptureSession.isSupported,
+            supportsOnDevicePhotogrammetry: PhotogrammetrySession.isSupported
         )
     }
 }
@@ -41,5 +45,13 @@ enum CameraPermission {
     static func request() async -> CameraPermission {
         guard current == .notDetermined else { return current }
         return await AVCaptureDevice.requestAccess(for: .video) ? .authorized : .denied
+    }
+
+    var title: String {
+        switch self {
+        case .authorized: "Allowed"
+        case .notDetermined: "Not requested"
+        case .denied: "Not allowed"
+        }
     }
 }
