@@ -14,4 +14,5 @@ and does not grant the contributor any rights in LiDARStudio.
 
 Security reports should avoid private photographs, scan datasets, depth data,
 credentials, certificates, or personal information. Use a private contact
-channel provided by the repository owner for sensitive disclosures.
+channel provided by the repository owner for sensitive disclosures. Follow
+`SECURITY.md` for the current reporting process.

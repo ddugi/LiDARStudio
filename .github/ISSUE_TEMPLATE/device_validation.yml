@@ -1,0 +1,54 @@
+name: Physical-device validation
+description: Record PASS, FAIL, or NOT TESTED hardware evidence.
+title: "[Device Validation]: "
+labels:
+  - device-validation
+body:
+  - type: input
+    id: revision
+    attributes:
+      label: Exact commit
+      placeholder: Full Git commit SHA
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Device and toolchain versions
+      placeholder: Device model; iOS version/build; Xcode version/build
+    validations:
+      required: true
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Test configuration and duration
+      placeholder: Basic ARKit, 30 seconds, well-lit textured room
+    validations:
+      required: true
+  - type: textarea
+    id: counts
+    attributes:
+      label: Actual framework and file counts
+      description: Report real callbacks, tracking states, images, depth frames, models, or files as applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: results
+    attributes:
+      label: Acceptance results
+      placeholder: List every criterion as PASS, FAIL, or NOT TESTED.
+    validations:
+      required: true
+  - type: textarea
+    id: performance
+    attributes:
+      label: CPU, memory, thermal, responsiveness, and termination evidence
+  - type: checkboxes
+    id: evidence
+    attributes:
+      label: Evidence confirmation
+      options:
+        - label: Results came from the stated physical device, not compilation or simulation.
+          required: true
+        - label: No private photos, depth payloads, datasets, credentials, or certificates are attached.
+          required: true

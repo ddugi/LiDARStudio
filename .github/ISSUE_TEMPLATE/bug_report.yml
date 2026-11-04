@@ -1,0 +1,64 @@
+name: Bug report
+description: Report a reproducible LiDARStudio application defect without private scan data.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach private photographs, RGB-D datasets, depth maps, certificates, provisioning profiles, credentials, or sysdiagnose archives.
+  - type: input
+    id: revision
+    attributes:
+      label: Commit or app version
+      placeholder: Commit SHA or 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Device, iOS, and Xcode
+      placeholder: iPhone model; iOS build; Xcode build
+    validations:
+      required: true
+  - type: dropdown
+    id: feature
+    attributes:
+      label: Feature area
+      options:
+        - Object Studio
+        - Room Studio
+        - Environment Studio
+        - My Scans
+        - App shell or accessibility
+        - Documentation or build
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Use non-sensitive test content and include the first failing action.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result and sanitized evidence
+      description: Include sanitized error codes or stack frames, not camera or depth payloads.
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I removed private scan data, credentials, certificates, and personal information.
+          required: true
