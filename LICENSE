@@ -1,16 +1,51 @@
-LiDARStudio Proprietary License
+LiDARStudio Proprietary Source-Available License
 
 Copyright © 2026 Dugi Selmanaj. All rights reserved.
 
-This software, its source code, designs, documentation, assets, product concepts,
-and associated materials (collectively, the “Software”) are proprietary and
-confidential property intended to be owned by Dugi Selmanaj.
+1. Ownership
 
-No permission is granted to use, copy, modify, merge, publish, distribute,
-sublicense, sell, reverse engineer, or create derivative works from the Software,
-in whole or in part, without prior written authorization from Dugi Selmanaj.
+LiDARStudio, including its source code, object code, documentation, designs,
+artwork, product concepts, scan workflows, and associated materials
+(collectively, the “Software”), is proprietary to Dugi Selmanaj. All rights not
+expressly granted in a separate written agreement signed by Dugi Selmanaj are
+reserved.
 
-The Software is provided “as is,” without warranty of any kind, express or
-implied, including but not limited to merchantability, fitness for a particular
-purpose, and noninfringement. In no event shall the copyright holder be liable
-for any claim, damages, or other liability arising from the Software or its use.
+2. Public availability is not a license
+
+The Software may be publicly viewable for transparency, evaluation, security
+review, and demonstration. Public access to this repository does not make the
+Software open source and does not grant any copyright, patent, trademark,
+trade-secret, database, publicity, or other intellectual-property rights.
+This is subject only to the limited platform rights required by GitHub's
+applicable terms of service; no additional license is granted by Dugi Selmanaj.
+
+3. Restrictions
+
+Without prior written authorization from Dugi Selmanaj, you may not use, copy,
+modify, adapt, translate, merge, publish, distribute, sublicense, sell, host,
+commercialize, reverse engineer, create derivative works from, or incorporate
+the Software into another product or service, in whole or in part. You may not
+remove or alter copyright, ownership, or license notices.
+
+4. No trademark license
+
+No permission is granted to use the names LiDARStudio or Dugi Selmanaj, or any
+associated logos, icons, trade dress, or branding, except to accurately identify
+the Software when referring to this repository.
+
+5. Third-party materials
+
+Third-party and Apple platform materials, if any, remain subject to their own
+terms. Their inclusion or reference does not expand the rights granted under
+this license. See Documentation/THIRD_PARTY_DEPENDENCIES.md.
+
+6. No warranty
+
+THE SOFTWARE IS PROVIDED “AS IS,” WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE, TITLE, AND NONINFRINGEMENT. TO THE MAXIMUM EXTENT PERMITTED BY LAW,
+DUGI SELMANAJ SHALL NOT BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY
+ARISING FROM OR RELATED TO THE SOFTWARE OR ITS USE.
+
+For licensing inquiries or permissions, contact the repository owner through
+the verified contact method listed on the official GitHub repository.

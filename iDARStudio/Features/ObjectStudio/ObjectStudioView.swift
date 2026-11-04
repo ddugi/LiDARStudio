@@ -1,5 +1,6 @@
 import SwiftUI
 import RealityKit
+import OSLog
 
 struct ObjectStudioView: View {
     @EnvironmentObject private var library: ScanLibrary
@@ -7,6 +8,10 @@ struct ObjectStudioView: View {
     @StateObject private var coordinator = ObjectCaptureCoordinator()
     @State private var showsHelp = false
     @State private var scanName = "Object Scan"
+    private let uiLogger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "LiDARStudio",
+        category: "ObjectStudioUI"
+    )
 
     var body: some View {
         ZStack {
@@ -37,47 +42,73 @@ struct ObjectStudioView: View {
     }
 
     private func captureView(session: ObjectCaptureSession) -> some View {
-        ObjectCaptureView(session: session) {
+        ZStack {
+            ObjectCaptureView(session: session)
+                .ignoresSafeArea()
+
             VStack(spacing: 12) {
                 captureHeader
                 Spacer()
                 if let feedback = coordinator.detectionRecoveryMessage ?? coordinator.feedbackMessage {
                     Text(feedback)
-                        .font(.subheadline.weight(.semibold))
+                        .font(.footnote.weight(.semibold))
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(.black.opacity(0.72), in: Capsule())
+                        .lineLimit(3)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(.black.opacity(0.64), in: RoundedRectangle(cornerRadius: 14))
+                        .allowsHitTesting(false)
                         .transition(.opacity)
                 }
                 captureControls
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 10)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .zIndex(1)
         }
-        .ignoresSafeArea()
     }
 
     private var captureHeader: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(coordinator.progressStatus?.rawValue ?? "Object Studio")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
                 Text(captureInstruction)
-                    .font(.headline)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.78))
+                    .lineLimit(2)
                 if coordinator.phase == .capturing {
-                    Text("\(coordinator.photoCount) photos")
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(StudioTheme.accent)
+                    HStack(spacing: 6) {
+                        Text(coordinator.captureGuideStage.title)
+                        Text("·")
+                        Text("\(coordinator.photoCount)/\(coordinator.maximumPhotoCount) photos")
+                            .monospacedDigit()
+                        if coordinator.currentPassCompleted {
+                            Label("Pass complete", systemImage: "checkmark.circle.fill")
+                        }
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(StudioTheme.accent)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                 }
             }
             Spacer()
-            Button("Help", systemImage: "questionmark.circle") { showsHelp.toggle() }
+            Button("Help", systemImage: "questionmark.circle") {
+                uiLogger.notice("UI_HELP_TAPPED")
+                showsHelp.toggle()
+            }
                 .labelStyle(.iconOnly)
                 .buttonStyle(.bordered)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
                 .accessibilityLabel("Capture help")
         }
-        .padding(14)
-        .background(.black.opacity(0.70), in: RoundedRectangle(cornerRadius: 18))
-        .padding(.top, 54)
+        .padding(.leading, 12)
+        .padding(.trailing, 6)
+        .padding(.vertical, 6)
+        .background(.black.opacity(0.64), in: RoundedRectangle(cornerRadius: 16))
         .popover(isPresented: $showsHelp) {
             captureHelp
                 .presentationCompactAdaptation(.sheet)
@@ -86,29 +117,51 @@ struct ObjectStudioView: View {
 
     @ViewBuilder
     private var captureControls: some View {
-        HStack(spacing: 18) {
-            Button(role: .cancel, action: coordinator.cancel) {
-                Image(systemName: "xmark")
-                    .frame(width: 44, height: 44)
+        HStack(spacing: 8) {
+            Button(role: .cancel) {
+                uiLogger.notice("UI_CANCEL_TAPPED")
+                coordinator.cancel()
+            } label: {
+                compactControlLabel("Cancel", systemImage: "xmark")
             }
             .buttonStyle(.bordered)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
             .accessibilityLabel("Cancel capture")
 
             if coordinator.phase == .readyForDetection {
-                Button("Try Detection", systemImage: "viewfinder", action: coordinator.retryDetection)
+                Button {
+                    uiLogger.notice("UI_RETRY_TAPPED")
+                    coordinator.retryDetection()
+                } label: {
+                    compactControlLabel("Retry", systemImage: "viewfinder")
+                }
                     .buttonStyle(.borderedProminent)
                     .tint(StudioTheme.accent)
                     .foregroundStyle(.black)
-                Button("Skip Box", systemImage: "arrow.right", action: coordinator.startFreeformCapture)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                    .disabled(coordinator.isDetectionOperationPending)
+                Button {
+                    uiLogger.notice("UI_SKIP_TAPPED")
+                    coordinator.startFreeformCapture()
+                } label: {
+                    compactControlLabel("Free Scan", systemImage: "arrow.right")
+                }
                     .buttonStyle(.bordered)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                    .disabled(coordinator.isDetectionOperationPending)
                     .accessibilityHint("Starts Apple's freeform object capture without a selection box")
             } else if coordinator.phase == .detecting {
                 Button("Reset", systemImage: "arrow.counterclockwise", action: coordinator.resetBoundingBox)
                     .buttonStyle(.bordered)
+                    .frame(minHeight: 44)
                 Button("Use Box", systemImage: "checkmark", action: coordinator.confirmBoundingBox)
                     .buttonStyle(.borderedProminent)
                     .tint(StudioTheme.accent)
                     .foregroundStyle(.black)
+                    .frame(minHeight: 44)
             } else if coordinator.phase == .capturing {
                 Button(action: coordinator.takePhoto) {
                     ZStack {
@@ -121,19 +174,39 @@ struct ObjectStudioView: View {
                 .accessibilityLabel("Take photo")
                 .accessibilityHint(coordinator.canTakePhoto ? "Captures the current angle" : "Wait until the camera is ready")
 
-                Button("Finish", systemImage: "checkmark", action: coordinator.finishCapture)
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.bordered)
-                    .disabled(coordinator.photoCount == 0)
-                    .accessibilityLabel("Finish photography")
+                Button(action: coordinator.advanceCaptureGuide) {
+                    compactControlLabel(
+                        LocalizedStringKey(coordinator.captureGuideActionTitle),
+                        systemImage: coordinator.captureGuideStage == .extraAngles || coordinator.reachedInputImageLimit
+                            ? "photo.stack"
+                            : "arrow.right"
+                    )
+                }
+                    .buttonStyle(.borderedProminent)
+                    .tint(StudioTheme.accent)
+                    .foregroundStyle(.black)
+                    .frame(minHeight: 44)
+                    .disabled(!coordinator.canAdvanceCaptureGuide)
+                    .accessibilityHint(coordinator.currentPassCompleted
+                        ? "Advances to the next guided capture pass"
+                        : "Complete the current Apple Object Capture pass first")
             } else {
                 ProgressView().tint(StudioTheme.accent)
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(.black.opacity(0.72), in: Capsule())
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(.black.opacity(0.64), in: RoundedRectangle(cornerRadius: 18))
+        .allowsHitTesting(true)
+    }
+
+    private func compactControlLabel(_ title: LocalizedStringKey, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.subheadline.weight(.semibold))
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .fixedSize(horizontal: true, vertical: false)
     }
 
     private var landingView: some View {
@@ -172,11 +245,19 @@ struct ObjectStudioView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Review photographs")
+                    Text("Review Photos")
                         .font(.title2.bold())
-                    Text("These are the original local files Object Capture produced. Remove glare or blurred angles by starting a new capture before reconstruction.")
+                    Text("Capture is complete. Review the original local photos, name the scan, then create the 3D model.")
                         .font(.subheadline)
                         .foregroundStyle(StudioTheme.secondaryText)
+                }
+
+                if let message = coordinator.reconstructionErrorMessage {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(StudioTheme.warning)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .studioCard()
                 }
 
                 HStack {
@@ -187,6 +268,8 @@ struct ObjectStudioView: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(StudioTheme.accent)
                 .studioCard()
+
+                captureStageSummary
 
                 TextField("Scan name", text: $scanName)
                     .textInputAutocapitalization(.words)
@@ -214,7 +297,7 @@ struct ObjectStudioView: View {
                 .buttonStyle(.bordered)
 
                 Button { coordinator.startReconstruction(name: scanName) } label: {
-                    Label("Reconstruct Textured Model", systemImage: "cube.fill")
+                    Label("Create 3D Model", systemImage: "cube.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -235,6 +318,8 @@ struct ObjectStudioView: View {
                 .foregroundStyle(StudioTheme.accent)
                 .accessibilityHidden(true)
             VStack(spacing: 8) {
+                Text(coordinator.progressStatus?.rawValue ?? ScanProgressStatus.processingModel.rawValue)
+                    .font(.title2.bold())
                 Text(coordinator.reconstructionStage)
                     .font(.title3.bold())
                 Text("\(Int(coordinator.reconstructionProgress * 100))%")
@@ -270,17 +355,23 @@ struct ObjectStudioView: View {
                 .foregroundStyle(StudioTheme.accent)
                 .accessibilityHidden(true)
             VStack(spacing: 8) {
-                Text("Textured model saved")
+                Text(ScanProgressStatus.scanCompleted.rawValue)
                     .font(.title2.bold())
+                Text("3D Model Saved")
+                    .font(.headline)
+                    .foregroundStyle(StudioTheme.accent)
                 Text("The USDZ and original photographs are stored locally and will remain available after restart.")
                     .font(.subheadline)
                     .foregroundStyle(StudioTheme.secondaryText)
                     .multilineTextAlignment(.center)
             }
+
+            modelFileCard(modelURL: modelURL)
+
             NavigationLink {
                 USDZViewerView(modelURL: modelURL, title: coordinator.completedScan?.name ?? scanName)
             } label: {
-                Label("Open 3D Model", systemImage: "cube.transparent")
+                Label("View in 3D", systemImage: "cube.transparent")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
@@ -288,7 +379,15 @@ struct ObjectStudioView: View {
             .foregroundStyle(.black)
 
             ShareLink(item: modelURL) {
-                Label("Share USDZ", systemImage: "square.and.arrow.up")
+                Label("Share / Save to Files", systemImage: "square.and.arrow.up")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+
+            NavigationLink {
+                ScanLibraryView()
+            } label: {
+                Label("Open My Scans", systemImage: "square.stack.3d.up")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
@@ -299,6 +398,32 @@ struct ObjectStudioView: View {
             Spacer()
         }
         .padding(24)
+    }
+
+    private func modelFileCard(modelURL: URL) -> some View {
+        let scan = coordinator.completedScan
+        let size = scan?.fileSizeBytes.map {
+            ByteCountFormatter.string(fromByteCount: $0, countStyle: .file)
+        } ?? "Unknown size"
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Label(modelURL.lastPathComponent, systemImage: "doc.fill")
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            HStack {
+                Text("USDZ")
+                Spacer()
+                Text(size)
+            }
+            .font(.caption)
+            .foregroundStyle(StudioTheme.secondaryText)
+            Label("Stored locally on this iPhone", systemImage: "iphone.gen3")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(StudioTheme.accent)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .studioCard()
     }
 
     private var capabilityCard: some View {
@@ -316,18 +441,31 @@ struct ObjectStudioView: View {
     @ViewBuilder
     private var statusCard: some View {
         switch coordinator.phase {
-        case .preparing, .finishing:
-            HStack { ProgressView(); Text("Preparing Object Capture…") }
+        case .preparing:
+            HStack { ProgressView(); Text(ScanProgressStatus.preparingCamera.rawValue) }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .studioCard()
+        case .finishing:
+            HStack { ProgressView(); Text(ScanProgressStatus.capturing.rawValue) }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .studioCard()
         case .permissionRequired:
             Label("Camera access is required. Enable it in Settings, then try again.", systemImage: "camera.fill")
                 .foregroundStyle(StudioTheme.warning)
                 .studioCard()
-        case .unsupported(let message), .failed(let message):
+        case .unsupported(let message):
             Label(message, systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(StudioTheme.warning)
                 .studioCard()
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 6) {
+                Label(ScanProgressStatus.scanFailed.rawValue, systemImage: "exclamationmark.triangle.fill")
+                    .font(.headline)
+                Text(message).font(.subheadline)
+            }
+            .foregroundStyle(StudioTheme.warning)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .studioCard()
         case .cancelled:
             Label("Capture cancelled. Camera resources were released; saved photos remain local.", systemImage: "xmark.circle")
                 .studioCard()
@@ -345,12 +483,33 @@ struct ObjectStudioView: View {
     private var captureInstruction: String {
         switch coordinator.phase {
         case .preparing: "Preparing camera…"
-        case .readyForDetection: "Center the reticle on the surface beneath the object."
-        case .detecting: "Adjust the box to fit only the object, then confirm."
-        case .capturing: "Move slowly around the object and photograph new angles."
-        case .finishing: "Saving photographs…"
+        case .readyForDetection: "Aim at the surface beneath the object"
+        case .detecting: "Adjust the box around the object"
+        case .capturing: coordinator.captureGuideStage.guidance
+        case .finishing: "Saving photos…"
         default: "Object Capture"
         }
+    }
+
+    private var captureStageSummary: some View {
+        HStack(spacing: 8) {
+            ForEach([ObjectCaptureGuideStage.overview, .detail, .extraAngles, .review], id: \.rawValue) { stage in
+                Text(stage.title)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(stage.rawValue <= coordinator.captureGuideStage.rawValue ? .black : StudioTheme.secondaryText)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(
+                        stage.rawValue <= coordinator.captureGuideStage.rawValue
+                            ? StudioTheme.accent
+                            : StudioTheme.elevatedSurface,
+                        in: Capsule()
+                    )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Capture stages: Overview, Detail, Extra Angles, Review")
     }
 
     private var captureHelp: some View {

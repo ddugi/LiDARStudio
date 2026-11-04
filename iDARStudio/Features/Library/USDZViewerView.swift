@@ -11,7 +11,7 @@ struct USDZViewerView: View {
             QuickLookModelPreview(url: modelURL)
                 .ignoresSafeArea(edges: .bottom)
             ShareLink(item: modelURL) {
-                Label("Share USDZ", systemImage: "square.and.arrow.up")
+                Label("Share / Save to Files", systemImage: "square.and.arrow.up")
                     .padding(.horizontal, 18)
                     .padding(.vertical, 12)
             }

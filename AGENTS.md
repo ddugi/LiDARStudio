@@ -4,8 +4,9 @@
 
 - Product owner and intended personal IP owner: **Dugi Selmanaj**.
 - Copyright: **© 2026 Dugi Selmanaj. All rights reserved.**
-- Treat all source code, designs, product concepts, scan workflows, assets, and documentation in this repository as proprietary and confidential unless explicitly identified otherwise.
+- Treat all source code, designs, product concepts, scan workflows, assets, and documentation in this repository as proprietary. Repository contents may be publicly viewable, but public access does not grant permission to use, copy, modify, or redistribute them.
 - Do not relicense, publish, redistribute, or copy project material into another product without Dugi Selmanaj's written authorization.
+- The repository is source-available, not open source. Preserve the root `LICENSE`, copyright notices, branding restrictions, and contribution policy.
 
 ## Engineering rules
 

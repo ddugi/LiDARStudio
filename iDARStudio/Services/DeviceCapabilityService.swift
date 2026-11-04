@@ -5,6 +5,7 @@ import RoomPlan
 nonisolated struct DeviceCapabilities: Equatable, Sendable {
     let hasCamera: Bool
     let supportsWorldTracking: Bool
+    let supportsSceneDepth: Bool
     let supportsLiDARMesh: Bool
     let supportsRoomPlan: Bool
 
@@ -17,6 +18,7 @@ enum DeviceCapabilityService {
         return DeviceCapabilities(
             hasCamera: hasCamera,
             supportsWorldTracking: ARWorldTrackingConfiguration.isSupported,
+            supportsSceneDepth: ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth),
             supportsLiDARMesh: ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh),
             supportsRoomPlan: RoomCaptureSession.isSupported
         )

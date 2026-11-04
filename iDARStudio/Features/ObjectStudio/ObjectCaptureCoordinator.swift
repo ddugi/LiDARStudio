@@ -14,31 +14,67 @@ final class ObjectCaptureCoordinator: ObservableObject {
     @Published private(set) var canTakePhoto = false
     @Published private(set) var feedbackMessage: String?
     @Published private(set) var detectionRecoveryMessage: String?
+    @Published private(set) var isDetectionOperationPending = false
     @Published private(set) var reviewPhotoURLs: [URL] = []
     @Published private(set) var captureDraft: ObjectCaptureDraft?
     @Published private(set) var reconstructionProgress = 0.0
     @Published private(set) var reconstructionStage = "Preparing photographs"
+    @Published private(set) var reconstructionErrorMessage: String?
     @Published private(set) var estimatedRemainingTime: TimeInterval?
     @Published private(set) var invalidPhotoCount = 0
     @Published private(set) var modelURL: URL?
     @Published private(set) var completedScan: ScanMetadata?
+    @Published private(set) var isSavingModel = false
+    @Published private(set) var captureGuideStage: ObjectCaptureGuideStage = .overview
+    @Published private(set) var currentPassCompleted = false
 
     let objectCaptureSupported: Bool
     let photogrammetrySupported: Bool
 
     private let repository: LocalScanRepository
+    private let screenAwakeManager: ScreenAwakeManager
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "LiDARStudio", category: "ObjectCapture")
     private var sessionTasks: [Task<Void, Never>] = []
     private var captureIdentifier: UUID?
-    private var didRequestDetection = false
+    private var detectionLifecycle = ObjectDetectionLifecycle()
+    private var detectionRequestSequence = 0
+    private var captureGuideWorkflow = ObjectCaptureGuideWorkflow()
     private var cleanupPerformed = true
     private var photogrammetrySession: PhotogrammetrySession?
     private var reconstructionTask: Task<Void, Never>?
+    private var captureAwakeSession: ScreenAwakeManager.Session?
+    private var reconstructionAwakeSession: ScreenAwakeManager.Session?
 
-    init(repository: LocalScanRepository = LocalScanRepository()) {
+    init(
+        repository: LocalScanRepository = LocalScanRepository(),
+        screenAwakeManager: ScreenAwakeManager? = nil
+    ) {
         self.repository = repository
+        self.screenAwakeManager = screenAwakeManager ?? .shared
         objectCaptureSupported = ObjectCaptureSession.isSupported
         photogrammetrySupported = PhotogrammetrySession.isSupported
+    }
+
+    var progressStatus: ScanProgressStatus? {
+        phase.progressStatus(isSavingModel: isSavingModel)
+    }
+
+    var reachedInputImageLimit: Bool {
+        maximumPhotoCount > 0 && photoCount >= maximumPhotoCount
+    }
+
+    var canAdvanceCaptureGuide: Bool {
+        phase == .capturing && (currentPassCompleted || reachedInputImageLimit)
+    }
+
+    var captureGuideActionTitle: String {
+        if reachedInputImageLimit { return "Review Photos" }
+        return switch captureGuideStage {
+        case .overview: "Start Detail Pass"
+        case .detail: "Extra Angles"
+        case .extraAngles: "Review Photos"
+        case .review, .process: "Continue"
+        }
     }
 
     deinit {
@@ -77,14 +113,18 @@ final class ObjectCaptureCoordinator: ObservableObject {
             let newSession = ObjectCaptureSession()
             var configuration = ObjectCaptureSession.Configuration()
             configuration.checkpointDirectory = workspace.checkpointsDirectory
-            configuration.isOverCaptureEnabled = true
+            configuration.isOverCaptureEnabled = false
 
             captureIdentifier = identifier
             let draft = ObjectCaptureDraft(id: identifier)
             try repository.saveObjectCaptureDraft(draft)
             captureDraft = draft
             cleanupPerformed = false
-            didRequestDetection = false
+            detectionLifecycle.prepareNewSession()
+            detectionRequestSequence = 0
+            captureGuideWorkflow = ObjectCaptureGuideWorkflow()
+            updateCaptureGuideState()
+            updateDetectionOperationState()
             photoCount = 0
             maximumPhotoCount = newSession.maximumNumberOfInputImages
             canTakePhoto = false
@@ -93,11 +133,12 @@ final class ObjectCaptureCoordinator: ObservableObject {
             reviewPhotoURLs = []
             session = newSession
             observe(newSession)
+            captureAwakeSession = screenAwakeManager.begin(.object)
             logger.info("Starting object capture session for local workspace \(identifier.uuidString, privacy: .public)")
             newSession.start(imagesDirectory: workspace.imagesDirectory, configuration: configuration)
         } catch {
             logger.error("Unable to prepare capture workspace: \(error.localizedDescription, privacy: .public)")
-            cleanupSession(cancelFramework: true)
+            cleanupSession(cancelFramework: true, reason: .failed)
             transition(to: .failed(error.localizedDescription))
         }
     }
@@ -105,21 +146,36 @@ final class ObjectCaptureCoordinator: ObservableObject {
     func confirmBoundingBox() {
         guard phase == .detecting, let session else { return }
         logger.info("User confirmed the Object Capture bounding box")
+        captureGuideWorkflow.startCapturing()
+        updateCaptureGuideState()
         session.startCapturing()
         transition(to: .capturing)
     }
 
     func retryDetection() {
         guard phase == .readyForDetection, let session else { return }
-        requestDetection(from: session, reason: "user retry")
+        guard detectionLifecycle.beginRetry(frameworkStateIsReady: session.state == .ready) else {
+            logger.notice("Ignored retry because detection is pending or the framework session is no longer ready")
+            return
+        }
+        updateDetectionOperationState()
+        performDetectionRequest(on: session, reason: "user retry")
     }
 
     func startFreeformCapture() {
         guard phase == .readyForDetection,
               let session,
-              session.state == .ready else { return }
+              detectionLifecycle.beginFreeformCapture(
+                  frameworkStateIsReady: session.state == .ready
+              ) else {
+            logger.notice("Ignored freeform capture because detection is pending or the session is not ready")
+            return
+        }
+        updateDetectionOperationState()
         detectionRecoveryMessage = nil
         logger.info("Starting supported freeform capture from Object Capture ready state")
+        captureGuideWorkflow.startCapturing()
+        updateCaptureGuideState()
         session.startCapturing()
         transition(to: .capturing)
     }
@@ -127,15 +183,31 @@ final class ObjectCaptureCoordinator: ObservableObject {
     func resetBoundingBox() {
         guard phase == .detecting, let session else { return }
         if session.resetDetection() {
-            didRequestDetection = false
+            detectionLifecycle.prepareForRedetection()
+            updateDetectionOperationState()
             detectionRecoveryMessage = nil
             logger.info("Object detection reset; waiting for ready state")
         }
     }
 
     func takePhoto() {
-        guard phase == .capturing, canTakePhoto, let session else { return }
+        guard phase == .capturing, canTakePhoto, !reachedInputImageLimit, let session else { return }
         session.requestImageCapture()
+    }
+
+    func advanceCaptureGuide() {
+        guard phase == .capturing, let session else { return }
+        let action = captureGuideWorkflow.advance(reachedImageLimit: reachedInputImageLimit)
+        updateCaptureGuideState()
+        switch action {
+        case .beginNewScanPass:
+            logger.info("Beginning guided Object Capture pass \(self.captureGuideStage.title, privacy: .public)")
+            session.beginNewScanPass()
+        case .finishCapture:
+            finishCapture()
+        case .none:
+            break
+        }
     }
 
     func finishCapture() {
@@ -148,7 +220,9 @@ final class ObjectCaptureCoordinator: ObservableObject {
     func cancel() {
         guard phase.isCaptureSessionActive else { return }
         logger.info("Cancelling active object capture session")
-        cleanupSession(cancelFramework: true)
+        detectionLifecycle.cancel()
+        updateDetectionOperationState()
+        cleanupSession(cancelFramework: true, reason: .cancelled)
         updateDraft(status: .cancelled)
         transition(to: .cancelled)
     }
@@ -172,8 +246,11 @@ final class ObjectCaptureCoordinator: ObservableObject {
     }
 
     func reset() {
-        cleanupSession(cancelFramework: true)
-        cleanupReconstruction(cancelFramework: true)
+        cleanupSession(cancelFramework: true, reason: .stopped)
+        cleanupReconstruction(cancelFramework: true, reason: .stopped)
+        captureGuideWorkflow = ObjectCaptureGuideWorkflow()
+        updateCaptureGuideState()
+        reconstructionErrorMessage = nil
         transition(to: .idle)
     }
 
@@ -189,6 +266,9 @@ final class ObjectCaptureCoordinator: ObservableObject {
         }
 
         do {
+            captureGuideWorkflow.beginProcessing()
+            updateCaptureGuideState()
+            reconstructionErrorMessage = nil
             let workspace = repository.objectCaptureWorkspace(id: captureIdentifier)
             let outputURL = try repository.modelFileURL(id: captureIdentifier)
             if FileManager.default.fileExists(atPath: outputURL.path) {
@@ -208,6 +288,7 @@ final class ObjectCaptureCoordinator: ObservableObject {
             photogrammetrySession = processingSession
             reconstructionProgress = 0
             reconstructionStage = "Preparing photographs"
+            isSavingModel = false
             estimatedRemainingTime = nil
             invalidPhotoCount = 0
             modelURL = nil
@@ -215,6 +296,7 @@ final class ObjectCaptureCoordinator: ObservableObject {
             updateDraft(status: .reconstructing)
             transition(to: .reconstructing)
             logger.info("Starting supported on-device photogrammetry for \(self.reviewPhotoURLs.count, privacy: .public) images")
+            reconstructionAwakeSession = screenAwakeManager.begin(.object)
             try processingSession.process(requests: [request])
             reconstructionTask = Task { [weak self, weak processingSession] in
                 guard let self, let processingSession else { return }
@@ -235,9 +317,12 @@ final class ObjectCaptureCoordinator: ObservableObject {
 
     func cancelReconstruction() {
         guard phase == .reconstructing else { return }
-        cleanupReconstruction(cancelFramework: true)
+        cleanupReconstruction(cancelFramework: true, reason: .cancelled)
+        captureGuideWorkflow.beginReview()
+        updateCaptureGuideState()
         updateDraft(status: .readyForReconstruction)
-        transition(to: .cancelled)
+        reconstructionErrorMessage = "3D model creation was cancelled. Your original photos remain available."
+        transition(to: .reviewing)
     }
 
     private func observe(_ observedSession: ObjectCaptureSession) {
@@ -277,6 +362,13 @@ final class ObjectCaptureCoordinator: ObservableObject {
                     guard !Task.isCancelled else { return }
                     self?.logCameraTracking(tracking, from: observedSession)
                 }
+            },
+            Task { [weak self, weak observedSession] in
+                guard let observedSession else { return }
+                for await completed in observedSession.userCompletedScanPassUpdates {
+                    guard !Task.isCancelled else { return }
+                    self?.handleScanPassCompletion(completed, from: observedSession)
+                }
             }
         ]
     }
@@ -289,46 +381,85 @@ final class ObjectCaptureCoordinator: ObservableObject {
             break
         case .ready:
             transition(to: .readyForDetection)
-            guard !didRequestDetection else { return }
-            requestDetection(from: observedSession, reason: "automatic initial request")
+            guard detectionLifecycle.sessionBecameReady() else {
+                updateDetectionOperationState()
+                return
+            }
+            updateDetectionOperationState()
+            performDetectionRequest(on: observedSession, reason: "automatic initial request")
         case .detecting:
+            detectionLifecycle.sessionBecameDetecting()
+            updateDetectionOperationState()
             detectionRecoveryMessage = nil
             transition(to: .detecting)
         case .capturing:
+            if phase != .capturing {
+                captureGuideWorkflow.startCapturing()
+                updateCaptureGuideState()
+            }
+            detectionLifecycle.sessionBecameCapturing()
+            updateDetectionOperationState()
             detectionRecoveryMessage = nil
             transition(to: .capturing)
         case .finishing:
             transition(to: .finishing)
         case .completed:
-            cleanupSession(cancelFramework: false)
+            cleanupSession(cancelFramework: false, reason: .completed)
             prepareReview()
             transition(to: .reviewing)
         case .failed(let error):
             let frameworkError = error as NSError
             logger.error("Object capture failed: domain=\(frameworkError.domain, privacy: .public) code=\(frameworkError.code, privacy: .public) description=\(error.localizedDescription, privacy: .public)")
-            cleanupSession(cancelFramework: false)
+            cleanupSession(cancelFramework: false, reason: .failed)
             transition(to: .failed(error.localizedDescription))
         @unknown default:
             logger.error("Object Capture reported an unknown state")
         }
     }
 
-    private func requestDetection(from observedSession: ObjectCaptureSession, reason: String) {
+    private func performDetectionRequest(on observedSession: ObjectCaptureSession, reason: String) {
         guard session === observedSession,
               observedSession.state == .ready else {
-            logger.notice("Ignored object detection request because the session was not ready")
+            detectionLifecycle.detectionRequestReturned(started: false)
+            updateDetectionOperationState()
+            logger.notice("Aborted object detection invocation because the active session was no longer ready")
             return
         }
 
-        didRequestDetection = true
-        let started = observedSession.startDetecting()
+        detectionRequestSequence += 1
+        let requestID = detectionRequestSequence
+        let frameworkState = String(describing: observedSession.state)
+        let tracking = String(describing: observedSession.cameraTracking)
         let authorization = String(describing: AVCaptureDevice.authorizationStatus(for: .video))
-        logger.info("Object detection request (\(reason, privacy: .public)) returned \(started, privacy: .public); frameworkState=ready cameraAuthorization=\(authorization, privacy: .public)")
+        logger.info("Invoking object detection requestID=\(requestID, privacy: .public) reason=\(reason, privacy: .public) frameworkState=\(frameworkState, privacy: .public) tracking=\(tracking, privacy: .public) cameraAuthorization=\(authorization, privacy: .public)")
+
+        let started = observedSession.startDetecting()
+        detectionLifecycle.detectionRequestReturned(started: started)
+        updateDetectionOperationState()
+        logger.info("Object detection requestID=\(requestID, privacy: .public) returned \(started, privacy: .public); frameworkState=\(String(describing: observedSession.state), privacy: .public)")
         guard started else {
-            detectionRecoveryMessage = "No supporting surface is available at the center reticle yet. Aim at the surface beneath the object, then try detection again or continue without a box."
+            detectionRecoveryMessage = "No surface found. Reposition the reticle, then Retry or use Free Scan."
             return
         }
         detectionRecoveryMessage = nil
+    }
+
+    private func updateDetectionOperationState() {
+        isDetectionOperationPending = detectionLifecycle.isOperationPending
+    }
+
+    private func handleScanPassCompletion(_ completed: Bool, from observedSession: ObjectCaptureSession) {
+        guard session === observedSession, phase == .capturing else { return }
+        captureGuideWorkflow.sessionReportedPassCompleted(completed)
+        updateCaptureGuideState()
+        if completed {
+            logger.info("Object Capture reported completed guided pass \(self.captureGuideStage.title, privacy: .public)")
+        }
+    }
+
+    private func updateCaptureGuideState() {
+        captureGuideStage = captureGuideWorkflow.stage
+        currentPassCompleted = captureGuideWorkflow.currentPassCompleted
     }
 
     private func logCameraTracking(
@@ -339,15 +470,21 @@ final class ObjectCaptureCoordinator: ObservableObject {
         logger.info("Object Capture camera tracking changed to \(String(describing: tracking), privacy: .public)")
     }
 
-    private func cleanupSession(cancelFramework: Bool) {
+    private func cleanupSession(cancelFramework: Bool, reason: ScreenAwakeManager.EndReason) {
         guard !cleanupPerformed else { return }
         cleanupPerformed = true
+        detectionLifecycle.cancel()
+        updateDetectionOperationState()
         sessionTasks.forEach { $0.cancel() }
         sessionTasks.removeAll()
         if cancelFramework {
             session?.cancel()
         }
         session = nil
+        if let captureAwakeSession {
+            screenAwakeManager.end(captureAwakeSession, reason: reason)
+            self.captureAwakeSession = nil
+        }
         canTakePhoto = false
         feedbackMessage = nil
         detectionRecoveryMessage = nil
@@ -399,6 +536,7 @@ final class ObjectCaptureCoordinator: ObservableObject {
                 reconstructionFailed(error)
             }
         case .processingComplete:
+            isSavingModel = true
             guard let modelURL else {
                 reconstructionFailed(ObjectStudioError.missingModelFile)
                 return
@@ -423,10 +561,10 @@ final class ObjectCaptureCoordinator: ObservableObject {
                 reconstructionFailed(error)
                 return
             }
-            cleanupReconstruction(cancelFramework: false)
+            cleanupReconstruction(cancelFramework: false, reason: .completed)
             transition(to: .completed)
         case .processingCancelled:
-            cleanupReconstruction(cancelFramework: false)
+            cleanupReconstruction(cancelFramework: false, reason: .cancelled)
         @unknown default:
             logger.error("Photogrammetry reported an unknown output")
         }
@@ -449,15 +587,23 @@ final class ObjectCaptureCoordinator: ObservableObject {
     private func reconstructionFailed(_ error: Error) {
         logger.error("Photogrammetry failed: \(error.localizedDescription, privacy: .public)")
         updateDraft(status: .failed)
-        cleanupReconstruction(cancelFramework: true)
-        transition(to: .failed(error.localizedDescription))
+        cleanupReconstruction(cancelFramework: true, reason: .failed)
+        captureGuideWorkflow.beginReview()
+        updateCaptureGuideState()
+        reconstructionErrorMessage = "\(error.localizedDescription) Your original photos remain available; you can try again."
+        transition(to: .reviewing)
     }
 
-    private func cleanupReconstruction(cancelFramework: Bool) {
+    private func cleanupReconstruction(cancelFramework: Bool, reason: ScreenAwakeManager.EndReason) {
         reconstructionTask?.cancel()
         reconstructionTask = nil
         if cancelFramework { photogrammetrySession?.cancel() }
         photogrammetrySession = nil
+        isSavingModel = false
+        if let reconstructionAwakeSession {
+            screenAwakeManager.end(reconstructionAwakeSession, reason: reason)
+            self.reconstructionAwakeSession = nil
+        }
     }
 
     private static func title(for stage: PhotogrammetrySession.Output.ProcessingStage) -> String {
@@ -475,8 +621,11 @@ final class ObjectCaptureCoordinator: ObservableObject {
     private func prepareReview() {
         guard let captureIdentifier else { return }
         do {
+            captureGuideWorkflow.beginReview()
+            updateCaptureGuideState()
             reviewPhotoURLs = try repository.capturedImageURLs(id: captureIdentifier)
             photoCount = reviewPhotoURLs.count
+            reconstructionErrorMessage = nil
             updateDraft(status: .readyForReconstruction)
             logger.info("Prepared local review for \(self.reviewPhotoURLs.count, privacy: .public) captured images")
         } catch {

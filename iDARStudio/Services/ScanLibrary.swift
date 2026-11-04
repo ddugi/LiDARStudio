@@ -30,29 +30,32 @@ final class ScanLibrary: ObservableObject {
     }
 
     func upsert(_ scan: ScanMetadata) {
-        if let index = scans.firstIndex(where: { $0.id == scan.id }) {
-            scans[index] = scan
+        var updatedScans = scans
+        if let index = updatedScans.firstIndex(where: { $0.id == scan.id }) {
+            updatedScans[index] = scan
         } else {
-            scans.append(scan)
+            updatedScans.append(scan)
         }
-        scans.sort { $0.updatedAt > $1.updatedAt }
-        persist()
+        updatedScans.sort { $0.updatedAt > $1.updatedAt }
+        persist(updatedScans)
     }
 
     func delete(at offsets: IndexSet) {
+        var updatedScans = scans
         for index in offsets.sorted(by: >) {
-            scans.remove(at: index)
+            updatedScans.remove(at: index)
         }
-        persist()
+        persist(updatedScans)
     }
 
     func modelURL(for scan: ScanMetadata) -> URL? {
-        try? repository.modelURL(for: scan)
+        try? repository.existingModelURL(for: scan)
     }
 
-    private func persist() {
+    private func persist(_ updatedScans: [ScanMetadata]) {
         do {
-            try repository.save(scans)
+            try repository.save(updatedScans)
+            scans = updatedScans
             state = .loaded
         } catch {
             state = .failed(error.localizedDescription)

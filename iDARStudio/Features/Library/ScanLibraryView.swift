@@ -47,11 +47,11 @@ struct ScanLibraryView: View {
                         NavigationLink {
                             USDZViewerView(modelURL: modelURL, title: scan.name)
                         } label: {
-                            ScanRow(scan: scan)
+                            ScanRow(scan: scan, modelAvailable: true)
                         }
                         .listRowBackground(StudioTheme.surface)
                     } else {
-                        ScanRow(scan: scan)
+                        ScanRow(scan: scan, modelAvailable: false)
                             .listRowBackground(StudioTheme.surface)
                     }
                 }
@@ -64,6 +64,7 @@ struct ScanLibraryView: View {
 
 private struct ScanRow: View {
     let scan: ScanMetadata
+    let modelAvailable: Bool
 
     var body: some View {
         HStack(spacing: 14) {
@@ -77,6 +78,15 @@ private struct ScanRow: View {
                 Text("\(scan.kind.title) · \(scan.updatedAt.formatted(date: .abbreviated, time: .shortened))")
                     .font(.caption)
                     .foregroundStyle(StudioTheme.secondaryText)
+                if modelAvailable, let fileSize = scan.fileSizeBytes {
+                    Text("USDZ · \(ByteCountFormatter.string(fromByteCount: fileSize, countStyle: .file)) · Local")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(StudioTheme.accent)
+                } else if !modelAvailable, scan.relativeModelPath != nil {
+                    Text("Model file unavailable")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(StudioTheme.warning)
+                }
             }
         }
         .padding(.vertical, 6)

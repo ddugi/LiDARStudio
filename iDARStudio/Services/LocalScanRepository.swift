@@ -108,9 +108,30 @@ nonisolated struct LocalScanRepository: Sendable {
 
     func modelURL(for scan: ScanMetadata) throws -> URL? {
         guard let relativePath = scan.relativeModelPath else { return nil }
-        let resolved = modelsDirectory.appending(path: relativePath).standardizedFileURL
-        guard resolved.path.hasPrefix(modelsDirectory.standardizedFileURL.path + "/") else {
+        guard !relativePath.isEmpty,
+              relativePath == URL(fileURLWithPath: relativePath).lastPathComponent,
+              !relativePath.contains("/") && !relativePath.contains("\\") else {
             throw RepositoryError.invalidModelPath
+        }
+        let resolved = modelsDirectory.appending(path: relativePath).standardizedFileURL
+        guard resolved.deletingLastPathComponent() == modelsDirectory.standardizedFileURL else {
+            throw RepositoryError.invalidModelPath
+        }
+        return resolved
+    }
+
+    func existingModelURL(for scan: ScanMetadata) throws -> URL? {
+        guard let resolved = try modelURL(for: scan),
+              resolved.pathExtension.lowercased() == "usdz",
+              FileManager.default.fileExists(atPath: resolved.path) else {
+            return nil
+        }
+        let values = try resolved.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
+        guard values.isRegularFile == true,
+              values.isSymbolicLink != true,
+              (values.fileSize ?? 0) >= 64,
+              try hasUSDZContainerSignature(at: resolved) else {
+            return nil
         }
         return resolved
     }
@@ -143,5 +164,11 @@ nonisolated struct LocalScanRepository: Sendable {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return decoder
+    }
+
+    private func hasUSDZContainerSignature(at url: URL) throws -> Bool {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        return try handle.read(upToCount: 4) == Data([0x50, 0x4B, 0x03, 0x04])
     }
 }

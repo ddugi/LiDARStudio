@@ -1,0 +1,40 @@
+# macOS and Xcode user state
+.DS_Store
+**/.DS_Store
+DerivedData/
+build/
+*.xcuserstate
+**/xcuserdata/
+*.xccheckout
+*.xcscmblueprint
+
+# Signing identities and provisioning material must never be committed
+*.p12
+*.pfx
+*.cer
+*.crt
+*.pem
+*.key
+*.mobileprovision
+*.provisionprofile
+
+# Local logs, diagnostics, and result bundles
+*.log
+*.trace
+*.xcresult
+sysdiagnose_*
+
+# Private scan and RGB-D data
+*.usdz
+*.reality
+*.heic
+*.dng
+RGBDDatasets/
+ObjectCaptures/
+CapturedImages/
+Originals/
+ScanLibrary/
+
+# Swift Package Manager local state
+.build/
+.swiftpm/
