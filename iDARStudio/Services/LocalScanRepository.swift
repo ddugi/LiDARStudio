@@ -179,6 +179,14 @@ nonisolated struct LocalScanRepository: Sendable {
         return total
     }
 
+    func storageBreakdown(diagnosticRootDirectory: URL? = nil) throws -> LocalStorageBreakdown {
+        let diagnosticRoot = try diagnosticRootDirectory ?? LocalStorageUsageCalculator.defaultDiagnosticRoot()
+        return try LocalStorageUsageCalculator().calculate(
+            scanRoot: rootDirectory,
+            diagnosticRoot: diagnosticRoot
+        )
+    }
+
     func delete(_ scan: ScanMetadata, keeping remainingScans: [ScanMetadata]) throws {
         let modelURL = try modelURL(for: scan)
         let previewURL = try existingPreviewURL(for: scan)

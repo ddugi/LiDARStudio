@@ -96,6 +96,10 @@ final class ScanLibrary: ObservableObject {
         try? repository.storageUsageBytes()
     }
 
+    func storageBreakdown() -> LocalStorageBreakdown? {
+        try? repository.storageBreakdown()
+    }
+
     func clearOperationError() {
         operationError = nil
     }

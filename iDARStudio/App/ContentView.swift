@@ -5,7 +5,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var navigation: AppNavigationState
     @EnvironmentObject private var library: ScanLibrary
-    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @AppStorage(OnboardingPreference.key) private var hasCompletedOnboarding = false
 
     var body: some View {
         NavigationStack(path: $navigation.path) {

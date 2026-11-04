@@ -4,61 +4,153 @@ import UIKit
 struct SettingsView: View {
     @EnvironmentObject private var library: ScanLibrary
     @Environment(\.openURL) private var openURL
-    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = true
-    @State private var storageBytes: Int64?
+    @AppStorage(OnboardingPreference.key) private var hasCompletedOnboarding = true
+    @AppStorage(PhotoTargetPreference.key) private var preferredPhotoTarget = 0
+    @State private var storageBreakdown: LocalStorageBreakdown?
     private let capabilities = DeviceCapabilityService.current()
+
+    private let photoTargets = [0, 50, 75, 100, 150, 200]
 
     var body: some View {
         ZStack {
             StudioBackground()
             List {
-                Section("Storage") {
-                    LabeledContent("Local scans", value: "\(library.scans.count)")
-                    LabeledContent("Scan library data", value: storageDescription)
-                    Text("Includes local scan metadata, models, capture photographs, and previews. Separate RGB-D diagnostic datasets are not included in this value.")
-                        .font(.caption).foregroundStyle(StudioTheme.secondaryText)
-                }
-                Section("Hardware & Permissions") {
-                    statusRow("Camera", value: CameraPermission.current.title, available: CameraPermission.current == .authorized)
-                    statusRow("Object Capture", supported: capabilities.supportsObjectCapture)
-                    statusRow("RoomPlan", supported: capabilities.supportsRoomPlan)
-                    statusRow("Scene depth", supported: capabilities.supportsSceneDepth)
-                    statusRow("LiDAR mesh", supported: capabilities.supportsLiDARMesh)
-                    if CameraPermission.current == .denied {
-                        Button("Open iOS Settings") {
-                            if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
-                        }
-                    }
-                }
-                Section("Diagnostics") {
-                    NavigationLink(value: AppDestination.environmentStudio) {
-                        Label("ARKit & RGB-D Diagnostics", systemImage: "waveform.path.ecg")
-                    }
-                    Text("Diagnostics use real public ARKit readings. Known tracking and depth blockers remain documented.")
-                        .font(.caption).foregroundStyle(StudioTheme.secondaryText)
-                }
-                Section("Privacy & Ownership") {
-                    Label("Local by default", systemImage: "lock.shield")
-                    Text("Sharing and export occur only after an explicit action. LiDARStudio does not upload scans automatically.")
-                        .font(.caption).foregroundStyle(StudioTheme.secondaryText)
-                    Text("© 2026 Dugi Selmanaj. All rights reserved.").font(.caption)
-                }
-                Section("Application") {
-                    LabeledContent("Version", value: appVersion)
-                    LabeledContent("Build", value: buildNumber)
-                    NavigationLink("About LiDARStudio", value: AppDestination.about)
-                    Button("Show Onboarding Again") { hasCompletedOnboarding = false }
-                }
+                capturePreferences
+                storage
+                access
+                hardwareAndPermissions
+                privacyAndOwnership
+                application
             }
             .scrollContentBackground(.hidden)
         }
         .navigationTitle("Settings")
-        .task { storageBytes = library.storageUsageBytes() }
+        .task { refreshStorage() }
+        .refreshable { refreshStorage() }
     }
 
-    private var storageDescription: String {
-        guard let storageBytes else { return "Unavailable" }
-        return ByteCountFormatter.string(fromByteCount: storageBytes, countStyle: .file)
+    private var capturePreferences: some View {
+        Section("Object Capture") {
+            Picker("Preferred photo target", selection: $preferredPhotoTarget) {
+                Text("Off").tag(0)
+                ForEach(photoTargets.dropFirst(), id: \.self) { target in
+                    Text("\(target) photos").tag(target)
+                }
+            }
+            .accessibilityHint("A personal guidance target. It does not automatically finish capture.")
+
+            LabeledContent("Capture mode", value: "Choose while capturing")
+            Text("The photo target is optional guidance, not an Apple-defined minimum. Automatic and manual capture can only be changed while the active Object Capture session reports that the control is available.")
+                .font(.caption)
+                .foregroundStyle(StudioTheme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var storage: some View {
+        Section("Local Storage") {
+            LabeledContent("Total managed data", value: formatted(storageBreakdown?.totalBytes))
+            storageRow("Models", bytes: storageBreakdown?.modelsBytes, symbol: "cube.transparent")
+            storageRow("Capture photographs", bytes: storageBreakdown?.capturePhotographsBytes, symbol: "photo.stack")
+            storageRow("Previews", bytes: storageBreakdown?.previewsBytes, symbol: "photo")
+            storageRow("Diagnostic datasets", bytes: storageBreakdown?.diagnosticDatasetsBytes, symbol: "waveform.path.ecg")
+            storageRow("Metadata & checkpoints", bytes: storageBreakdown?.otherScanDataBytes, symbol: "doc.text")
+            Text("Counts regular local files only. Symbolic links are excluded, and private filesystem paths are never displayed.")
+                .font(.caption)
+                .foregroundStyle(StudioTheme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var access: some View {
+        Section("App Access") {
+            NavigationLink(value: AppDestination.library) {
+                Label("Scan Library", systemImage: "square.stack.3d.up")
+            }
+            NavigationLink {
+                ObjectScanPreparationView()
+            } label: {
+                Label("Object Scan Preparation", systemImage: "checklist")
+            }
+            NavigationLink(value: AppDestination.environmentStudio) {
+                Label("ARKit & RGB-D Diagnostics", systemImage: "waveform.path.ecg")
+            }
+            Text("Environment tools expose real diagnostic state. Known ARKit tracking and depth blockers remain open.")
+                .font(.caption)
+                .foregroundStyle(StudioTheme.secondaryText)
+        }
+    }
+
+    private var hardwareAndPermissions: some View {
+        Section("Hardware & Permissions") {
+            statusRow("Camera", value: CameraPermission.current.title, available: CameraPermission.current == .authorized)
+            statusRow("Object Capture", supported: capabilities.supportsObjectCapture)
+            statusRow("On-device reconstruction", supported: capabilities.supportsOnDevicePhotogrammetry)
+            statusRow("RoomPlan", supported: capabilities.supportsRoomPlan)
+            statusRow("AR world tracking", supported: capabilities.supportsWorldTracking)
+            statusRow("Scene depth", supported: capabilities.supportsSceneDepth)
+            statusRow("LiDAR mesh", supported: capabilities.supportsLiDARMesh)
+            if CameraPermission.current == .denied {
+                Button("Open iOS Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        openURL(url)
+                    }
+                }
+                .accessibilityHint("Opens the system settings page for LiDARStudio.")
+            }
+            Text("Supported means the public API reports hardware capability. It does not mean every workflow has completed physical validation.")
+                .font(.caption)
+                .foregroundStyle(StudioTheme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var privacyAndOwnership: some View {
+        Section("Privacy & Ownership") {
+            Label("Local by default", systemImage: "lock.shield")
+            Text("LiDARStudio does not upload scans automatically. Sharing and export occur only after an explicit user action.")
+                .font(.caption)
+                .foregroundStyle(StudioTheme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            LabeledContent("Product owner", value: "Dugi Selmanaj")
+            Text("© 2026 Dugi Selmanaj. All rights reserved.")
+                .font(.caption)
+        }
+    }
+
+    private var application: some View {
+        Section("Application") {
+            LabeledContent("Version", value: appVersion)
+            LabeledContent("Build", value: buildNumber)
+            NavigationLink("About LiDARStudio", value: AppDestination.about)
+            Button {
+                hasCompletedOnboarding = false
+            } label: {
+                Label("Show Onboarding Again", systemImage: "sparkles.rectangle.stack")
+                    .frame(minHeight: 44)
+            }
+            .accessibilityHint("Opens the introductory pages without deleting settings or scans.")
+        }
+    }
+
+    private func storageRow(_ title: String, bytes: Int64?, symbol: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .foregroundStyle(StudioTheme.accent)
+                .frame(width: 24)
+                .accessibilityHidden(true)
+            Text(title)
+            Spacer(minLength: 8)
+            Text(formatted(bytes))
+                .foregroundStyle(StudioTheme.secondaryText)
+                .monospacedDigit()
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func formatted(_ bytes: Int64?) -> String {
+        guard let bytes else { return "Unavailable" }
+        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
     private var appVersion: String {
@@ -76,9 +168,15 @@ struct SettingsView: View {
     private func statusRow(_ title: String, value: String, available: Bool) -> some View {
         HStack {
             Text(title)
-            Spacer()
-            Text(value).foregroundStyle(available ? StudioTheme.accent : StudioTheme.warning)
+            Spacer(minLength: 8)
+            Text(value)
+                .foregroundStyle(available ? StudioTheme.accent : StudioTheme.warning)
+                .multilineTextAlignment(.trailing)
         }
         .accessibilityElement(children: .combine)
+    }
+
+    private func refreshStorage() {
+        storageBreakdown = library.storageBreakdown()
     }
 }

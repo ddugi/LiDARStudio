@@ -415,6 +415,13 @@ struct ObjectStudioView: View {
                     .font(.title2.bold())
                 capabilityCard
                 statusCard
+                NavigationLink {
+                    ObjectScanPreparationView()
+                } label: {
+                    Label("Review Preparation Checklist", systemImage: "checklist")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.bordered)
                 if canStart {
                     Button {
                         Task { await coordinator.start() }
@@ -427,7 +434,7 @@ struct ObjectStudioView: View {
                     .foregroundStyle(.black)
                     .controlSize(.large)
                 }
-                Text("Use a stationary object with diffuse, even light. Photographs remain on this device by default.")
+                Text("Use a stationary, textured object with diffuse, even light. Keep it centered, move slowly, and preserve overlapping viewpoints. Photographs remain on this device by default.")
                     .font(.footnote)
                     .foregroundStyle(StudioTheme.secondaryText)
                     .studioCard()
