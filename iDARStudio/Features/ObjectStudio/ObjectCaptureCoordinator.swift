@@ -27,30 +27,42 @@ final class ObjectCaptureCoordinator: ObservableObject {
     @Published private(set) var isSavingModel = false
     @Published private(set) var captureGuideStage: ObjectCaptureGuideStage = .overview
     @Published private(set) var currentPassCompleted = false
+    @Published private(set) var captureMode: ObjectCaptureMode = .objectCentric
+    @Published private(set) var isCapturePaused = false
+    @Published private(set) var isCaptureControlPending = false
+    @Published private(set) var isFinishOperationPending = false
+    @Published private(set) var isAutoCaptureEnabled = true
+    @Published private(set) var preferredPhotoTarget: Int?
 
     let objectCaptureSupported: Bool
     let photogrammetrySupported: Bool
 
     private let repository: LocalScanRepository
     private let screenAwakeManager: ScreenAwakeManager
+    private let userDefaults: UserDefaults
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "LiDARStudio", category: "ObjectCapture")
     private var sessionTasks: [Task<Void, Never>] = []
     private var captureIdentifier: UUID?
     private var detectionLifecycle = ObjectDetectionLifecycle()
     private var detectionRequestSequence = 0
     private var captureGuideWorkflow = ObjectCaptureGuideWorkflow()
+    private var captureControlLifecycle = ObjectCaptureControlLifecycle()
     private var cleanupPerformed = true
     private var photogrammetrySession: PhotogrammetrySession?
     private var reconstructionTask: Task<Void, Never>?
     private var captureAwakeSession: ScreenAwakeManager.Session?
     private var reconstructionAwakeSession: ScreenAwakeManager.Session?
+    private var frameworkCanTakePhoto = false
 
     init(
         repository: LocalScanRepository = LocalScanRepository(),
-        screenAwakeManager: ScreenAwakeManager? = nil
+        screenAwakeManager: ScreenAwakeManager? = nil,
+        userDefaults: UserDefaults = .standard
     ) {
         self.repository = repository
         self.screenAwakeManager = screenAwakeManager ?? .shared
+        self.userDefaults = userDefaults
+        preferredPhotoTarget = PhotoTargetPreference.read(from: userDefaults)
         objectCaptureSupported = ObjectCaptureSession.isSupported
         photogrammetrySupported = PhotogrammetrySession.isSupported
     }
@@ -60,21 +72,50 @@ final class ObjectCaptureCoordinator: ObservableObject {
     }
 
     var reachedInputImageLimit: Bool {
-        maximumPhotoCount > 0 && photoCount >= maximumPhotoCount
+        photoProgress.reachedMaximum
+    }
+
+    var photoProgress: ObjectCapturePhotoProgress {
+        ObjectCapturePhotoProgress(
+            captured: photoCount,
+            maximum: maximumPhotoCount,
+            preferredTarget: preferredPhotoTarget
+        )
     }
 
     var canAdvanceCaptureGuide: Bool {
-        phase == .capturing && (currentPassCompleted || reachedInputImageLimit)
+        guard phase == .capturing,
+              session?.state == .capturing,
+              !isCapturePaused,
+              !isCaptureControlPending,
+              !isFinishOperationPending,
+              captureGuideStage == .overview || captureGuideStage == .detail else { return false }
+        return captureMode == .freeform || currentPassCompleted
     }
 
     var captureGuideActionTitle: String {
-        if reachedInputImageLimit { return "Review Photos" }
         return switch captureGuideStage {
         case .overview: "Start Detail Pass"
         case .detail: "Extra Angles"
-        case .extraAngles: "Review Photos"
+        case .extraAngles: "Finish & Review"
         case .review, .process: "Continue"
         }
+    }
+
+    var canPauseCapture: Bool {
+        phase == .capturing && session?.state == .capturing && !isCapturePaused && !isCaptureControlPending && !isFinishOperationPending
+    }
+
+    var canResumeCapture: Bool {
+        phase == .capturing && session?.state == .capturing && isCapturePaused && !isCaptureControlPending && !isFinishOperationPending
+    }
+
+    var canFinishCapture: Bool {
+        phase == .capturing && session?.state == .capturing && !isCaptureControlPending && !isFinishOperationPending
+    }
+
+    var canChangeAutoCapture: Bool {
+        phase == .capturing && session?.state == .capturing && !isCaptureControlPending && !isFinishOperationPending
     }
 
     deinit {
@@ -123,10 +164,17 @@ final class ObjectCaptureCoordinator: ObservableObject {
             detectionLifecycle.prepareNewSession()
             detectionRequestSequence = 0
             captureGuideWorkflow = ObjectCaptureGuideWorkflow()
+            captureControlLifecycle.reset()
+            captureMode = .objectCentric
             updateCaptureGuideState()
+            updateCaptureControlState()
             updateDetectionOperationState()
-            photoCount = 0
+            photoCount = newSession.numberOfShotsTaken
             maximumPhotoCount = newSession.maximumNumberOfInputImages
+            if let preferredPhotoTarget {
+                setPreferredPhotoTarget(preferredPhotoTarget)
+            }
+            isAutoCaptureEnabled = newSession.isAutoCaptureEnabled
             canTakePhoto = false
             feedbackMessage = nil
             detectionRecoveryMessage = nil
@@ -146,8 +194,14 @@ final class ObjectCaptureCoordinator: ObservableObject {
     func confirmBoundingBox() {
         guard phase == .detecting, let session else { return }
         logger.info("User confirmed the Object Capture bounding box")
+        captureMode = .objectCentric
         captureGuideWorkflow.startCapturing()
         updateCaptureGuideState()
+        captureControlLifecycle.beginCapture(
+            isPaused: session.isPaused,
+            isAutoCaptureEnabled: session.isAutoCaptureEnabled
+        )
+        updateCaptureControlState()
         session.startCapturing()
         transition(to: .capturing)
     }
@@ -174,8 +228,14 @@ final class ObjectCaptureCoordinator: ObservableObject {
         updateDetectionOperationState()
         detectionRecoveryMessage = nil
         logger.info("Starting supported freeform capture from Object Capture ready state")
+        captureMode = .freeform
         captureGuideWorkflow.startCapturing()
         updateCaptureGuideState()
+        captureControlLifecycle.beginCapture(
+            isPaused: session.isPaused,
+            isAutoCaptureEnabled: session.isAutoCaptureEnabled
+        )
+        updateCaptureControlState()
         session.startCapturing()
         transition(to: .capturing)
     }
@@ -191,30 +251,80 @@ final class ObjectCaptureCoordinator: ObservableObject {
     }
 
     func takePhoto() {
-        guard phase == .capturing, canTakePhoto, !reachedInputImageLimit, let session else { return }
+        guard phase == .capturing,
+              let session,
+              captureControlLifecycle.canRequestManualPhoto(
+                  frameworkAllowsCapture: session.canRequestImageCapture,
+                  reachedMaximum: reachedInputImageLimit
+              ) else { return }
+        logger.info("Requesting one manual Object Capture image")
         session.requestImageCapture()
     }
 
     func advanceCaptureGuide() {
-        guard phase == .capturing, let session else { return }
-        let action = captureGuideWorkflow.advance(reachedImageLimit: reachedInputImageLimit)
+        guard phase == .capturing, let session, session.state == .capturing else { return }
+        let action = captureGuideWorkflow.advance(mode: captureMode)
         updateCaptureGuideState()
         switch action {
         case .beginNewScanPass:
             logger.info("Beginning guided Object Capture pass \(self.captureGuideStage.title, privacy: .public)")
             session.beginNewScanPass()
-        case .finishCapture:
-            finishCapture()
+        case .advanceGuidanceOnly:
+            logger.info("Advanced freeform guidance to \(self.captureGuideStage.title, privacy: .public) without starting a framework scan pass")
         case .none:
             break
         }
     }
 
-    func finishCapture() {
-        guard phase == .capturing, let session else { return }
-        transition(to: .finishing)
-        logger.info("Finishing object capture with \(self.photoCount, privacy: .public) photos")
-        session.finish()
+    func pauseCapture() {
+        guard let session,
+              captureControlLifecycle.requestPause(
+                  frameworkStateIsCapturing: session.state == .capturing
+              ) == .pause else { return }
+        updateCaptureControlState()
+        logger.info("Requesting Object Capture pause")
+        session.pause()
+    }
+
+    func resumeCapture() {
+        guard let session,
+              captureControlLifecycle.requestResume(
+                  frameworkStateIsCapturing: session.state == .capturing
+              ) == .resume else { return }
+        updateCaptureControlState()
+        logger.info("Requesting Object Capture resume")
+        session.resume()
+    }
+
+    func requestFinishCapture() {
+        guard let session else { return }
+        let action = captureControlLifecycle.requestFinish(
+            frameworkStateIsCapturing: session.state == .capturing
+        )
+        updateCaptureControlState()
+        performCaptureControlAction(action, on: session)
+    }
+
+    func setAutoCaptureEnabled(_ enabled: Bool) {
+        guard let session,
+              captureControlLifecycle.setAutoCaptureEnabled(
+                  enabled,
+                  frameworkStateIsCapturing: session.state == .capturing
+              ) else { return }
+        session.isAutoCaptureEnabled = enabled
+        isAutoCaptureEnabled = session.isAutoCaptureEnabled
+        logger.info("Automatic Object Capture changed to \(self.isAutoCaptureEnabled, privacy: .public)")
+    }
+
+    func setPreferredPhotoTarget(_ target: Int?) {
+        let normalized: Int?
+        if let target {
+            normalized = min(max(1, target), max(1, maximumPhotoCount))
+        } else {
+            normalized = nil
+        }
+        preferredPhotoTarget = normalized
+        PhotoTargetPreference.write(normalized, to: userDefaults)
     }
 
     func cancel() {
@@ -249,7 +359,9 @@ final class ObjectCaptureCoordinator: ObservableObject {
         cleanupSession(cancelFramework: true, reason: .stopped)
         cleanupReconstruction(cancelFramework: true, reason: .stopped)
         captureGuideWorkflow = ObjectCaptureGuideWorkflow()
+        captureControlLifecycle.reset()
         updateCaptureGuideState()
+        updateCaptureControlState()
         reconstructionErrorMessage = nil
         transition(to: .idle)
     }
@@ -339,14 +451,21 @@ final class ObjectCaptureCoordinator: ObservableObject {
                 guard let observedSession else { return }
                 for await count in observedSession.numberOfShotsTakenUpdates {
                     guard !Task.isCancelled else { return }
-                    self?.photoCount = count
+                    self?.handlePhotoCount(count, from: observedSession)
                 }
             },
             Task { [weak self, weak observedSession] in
                 guard let observedSession else { return }
                 for await canCapture in observedSession.canRequestImageCaptureUpdates {
                     guard !Task.isCancelled else { return }
-                    self?.canTakePhoto = canCapture
+                    self?.handleManualCaptureAvailability(canCapture, from: observedSession)
+                }
+            },
+            Task { [weak self, weak observedSession] in
+                guard let observedSession else { return }
+                for await paused in observedSession.isPausedUpdates {
+                    guard !Task.isCancelled else { return }
+                    self?.handlePausedState(paused, from: observedSession)
                 }
             },
             Task { [weak self, weak observedSession] in
@@ -393,15 +512,26 @@ final class ObjectCaptureCoordinator: ObservableObject {
             detectionRecoveryMessage = nil
             transition(to: .detecting)
         case .capturing:
-            if phase != .capturing {
+            guard phase != .finishing else {
+                logger.notice("Ignored late capturing callback after finish began")
+                return
+            }
+            if captureControlLifecycle.state == .inactive {
                 captureGuideWorkflow.startCapturing()
                 updateCaptureGuideState()
+                captureControlLifecycle.beginCapture(
+                    isPaused: observedSession.isPaused,
+                    isAutoCaptureEnabled: observedSession.isAutoCaptureEnabled
+                )
+                updateCaptureControlState()
             }
             detectionLifecycle.sessionBecameCapturing()
             updateDetectionOperationState()
             detectionRecoveryMessage = nil
             transition(to: .capturing)
         case .finishing:
+            captureControlLifecycle.sessionBeganFinishing()
+            updateCaptureControlState()
             transition(to: .finishing)
         case .completed:
             cleanupSession(cancelFramework: false, reason: .completed)
@@ -410,6 +540,8 @@ final class ObjectCaptureCoordinator: ObservableObject {
         case .failed(let error):
             let frameworkError = error as NSError
             logger.error("Object capture failed: domain=\(frameworkError.domain, privacy: .public) code=\(frameworkError.code, privacy: .public) description=\(error.localizedDescription, privacy: .public)")
+            photoCount = observedSession.numberOfShotsTaken
+            updateDraft(status: .failed)
             cleanupSession(cancelFramework: false, reason: .failed)
             transition(to: .failed(error.localizedDescription))
         @unknown default:
@@ -449,7 +581,7 @@ final class ObjectCaptureCoordinator: ObservableObject {
     }
 
     private func handleScanPassCompletion(_ completed: Bool, from observedSession: ObjectCaptureSession) {
-        guard session === observedSession, phase == .capturing else { return }
+        guard session === observedSession, phase == .capturing, captureMode == .objectCentric else { return }
         captureGuideWorkflow.sessionReportedPassCompleted(completed)
         updateCaptureGuideState()
         if completed {
@@ -460,6 +592,76 @@ final class ObjectCaptureCoordinator: ObservableObject {
     private func updateCaptureGuideState() {
         captureGuideStage = captureGuideWorkflow.stage
         currentPassCompleted = captureGuideWorkflow.currentPassCompleted
+    }
+
+    private func handlePhotoCount(_ count: Int, from observedSession: ObjectCaptureSession) {
+        guard session === observedSession else { return }
+        photoCount = count
+        refreshManualCaptureAvailability(for: observedSession)
+    }
+
+    private func handleManualCaptureAvailability(
+        _ canCapture: Bool,
+        from observedSession: ObjectCaptureSession
+    ) {
+        guard session === observedSession else { return }
+        frameworkCanTakePhoto = canCapture
+        refreshManualCaptureAvailability(for: observedSession)
+    }
+
+    private func handlePausedState(_ paused: Bool, from observedSession: ObjectCaptureSession) {
+        guard session === observedSession, observedSession.state == .capturing else { return }
+        guard paused == observedSession.isPaused else {
+            logger.notice("Ignored stale Object Capture pause callback")
+            return
+        }
+        let action = captureControlLifecycle.sessionReportedPaused(paused)
+        updateCaptureControlState()
+        refreshManualCaptureAvailability(for: observedSession)
+        logger.info("Object Capture pause state confirmed as \(paused, privacy: .public)")
+        performCaptureControlAction(action, on: observedSession)
+    }
+
+    private func performCaptureControlAction(
+        _ action: ObjectCaptureControlLifecycle.Action,
+        on observedSession: ObjectCaptureSession
+    ) {
+        guard session === observedSession else { return }
+        switch action {
+        case .resume:
+            logger.info("Resuming paused capture before requested finish")
+            observedSession.resume()
+        case .finish:
+            guard observedSession.state == .capturing, !observedSession.isPaused else {
+                logger.notice("Deferred finish because the active session is not in an unpaused capturing state")
+                return
+            }
+            transition(to: .finishing)
+            logger.info("Finishing object capture with \(self.photoCount, privacy: .public) photos")
+            observedSession.finish()
+        case .pause, .none:
+            break
+        }
+    }
+
+    private func updateCaptureControlState() {
+        isCapturePaused = captureControlLifecycle.isPaused
+        isCaptureControlPending = captureControlLifecycle.isTransitionPending
+        isFinishOperationPending = captureControlLifecycle.isFinishPending
+        isAutoCaptureEnabled = captureControlLifecycle.isAutoCaptureEnabled
+        if let session {
+            refreshManualCaptureAvailability(for: session)
+        } else {
+            canTakePhoto = false
+        }
+    }
+
+    private func refreshManualCaptureAvailability(for observedSession: ObjectCaptureSession) {
+        guard session === observedSession else { return }
+        canTakePhoto = captureControlLifecycle.canRequestManualPhoto(
+            frameworkAllowsCapture: frameworkCanTakePhoto && observedSession.canRequestImageCapture,
+            reachedMaximum: reachedInputImageLimit
+        )
     }
 
     private func logCameraTracking(
@@ -474,7 +676,9 @@ final class ObjectCaptureCoordinator: ObservableObject {
         guard !cleanupPerformed else { return }
         cleanupPerformed = true
         detectionLifecycle.cancel()
+        captureControlLifecycle.reset()
         updateDetectionOperationState()
+        updateCaptureControlState()
         sessionTasks.forEach { $0.cancel() }
         sessionTasks.removeAll()
         if cancelFramework {
@@ -486,6 +690,7 @@ final class ObjectCaptureCoordinator: ObservableObject {
             self.captureAwakeSession = nil
         }
         canTakePhoto = false
+        frameworkCanTakePhoto = false
         feedbackMessage = nil
         detectionRecoveryMessage = nil
         logger.debug("Object capture resources released")

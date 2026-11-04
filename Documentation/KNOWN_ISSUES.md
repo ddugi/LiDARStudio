@@ -29,6 +29,12 @@ workaround is used. See
 Impact: stable Object Studio detection and a complete real-device capture are
 not verified.
 
+The user-controlled capture state machine, HUD, and framework API calls compile
+and have non-hardware automated coverage. Pause/resume, manual capture,
+automatic-capture switching, early finish, and completion-to-review remain
+**not physically verified** because exercising detection may reproduce this P0
+assertion.
+
 ## P0 — ARKit tracking does not become normal
 
 Status: **confirmed in three debugger/device-hub Basic runs; root cause unknown**.

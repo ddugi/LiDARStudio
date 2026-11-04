@@ -7,6 +7,9 @@ struct ObjectStudioView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var coordinator = ObjectCaptureCoordinator()
     @State private var showsHelp = false
+    @State private var showsCaptureSettings = false
+    @State private var showsFinishConfirmation = false
+    @State private var framingGuideScale = 0.68
     @State private var scanName = "Object Scan"
     private let uiLogger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "LiDARStudio",
@@ -39,12 +42,30 @@ struct ObjectStudioView: View {
             guard let scan else { return }
             library.upsert(scan)
         }
+        .confirmationDialog(
+            "Finish capture?",
+            isPresented: $showsFinishConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Finish & Review") { coordinator.requestFinishCapture() }
+            Button("Continue Capturing", role: .cancel) {}
+        } message: {
+            Text(finishConfirmationMessage)
+        }
+        .sheet(isPresented: $showsCaptureSettings) {
+            captureSettings
+        }
     }
 
     private func captureView(session: ObjectCaptureSession) -> some View {
         ZStack {
             ObjectCaptureView(session: session)
                 .ignoresSafeArea()
+
+            if coordinator.phase == .capturing {
+                captureFramingGuide
+                    .zIndex(0.5)
+            }
 
             VStack(spacing: 12) {
                 captureHeader
@@ -79,18 +100,28 @@ struct ObjectStudioView: View {
                     .foregroundStyle(.white.opacity(0.78))
                     .lineLimit(2)
                 if coordinator.phase == .capturing {
-                    HStack(spacing: 6) {
-                        Text(coordinator.captureGuideStage.title)
-                        Text("·")
-                        Text("\(coordinator.photoCount)/\(coordinator.maximumPhotoCount) photos")
-                            .monospacedDigit()
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(coordinator.captureGuideStage.title)
+                            if coordinator.currentPassCompleted {
+                                Label("Pass complete", systemImage: "checkmark.circle.fill")
+                            }
+                        }
+                        HStack(spacing: 8) {
+                            Text("Captured \(coordinator.photoCount)")
+                            if let target = coordinator.preferredPhotoTarget {
+                                Text("Target \(target)")
+                            }
+                            Text("Maximum \(coordinator.maximumPhotoCount)")
+                        }
+                        .monospacedDigit()
                         if coordinator.currentPassCompleted {
-                            Label("Pass complete", systemImage: "checkmark.circle.fill")
+                            Text("Apple reported this pass complete")
                         }
                     }
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(StudioTheme.accent)
-                    .lineLimit(1)
+                    .lineLimit(2)
                     .minimumScaleFactor(0.75)
                 }
             }
@@ -115,90 +146,162 @@ struct ObjectStudioView: View {
         }
     }
 
-    @ViewBuilder
     private var captureControls: some View {
-        HStack(spacing: 8) {
-            Button(role: .cancel) {
-                uiLogger.notice("UI_CANCEL_TAPPED")
-                coordinator.cancel()
-            } label: {
-                compactControlLabel("Cancel", systemImage: "xmark")
-            }
-            .buttonStyle(.bordered)
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-            .accessibilityLabel("Cancel capture")
-
-            if coordinator.phase == .readyForDetection {
-                Button {
-                    uiLogger.notice("UI_RETRY_TAPPED")
-                    coordinator.retryDetection()
-                } label: {
-                    compactControlLabel("Retry", systemImage: "viewfinder")
-                }
-                    .buttonStyle(.borderedProminent)
-                    .tint(StudioTheme.accent)
-                    .foregroundStyle(.black)
-                    .frame(minHeight: 44)
-                    .contentShape(Rectangle())
-                    .disabled(coordinator.isDetectionOperationPending)
-                Button {
-                    uiLogger.notice("UI_SKIP_TAPPED")
-                    coordinator.startFreeformCapture()
-                } label: {
-                    compactControlLabel("Free Scan", systemImage: "arrow.right")
-                }
-                    .buttonStyle(.bordered)
-                    .frame(minHeight: 44)
-                    .contentShape(Rectangle())
-                    .disabled(coordinator.isDetectionOperationPending)
-                    .accessibilityHint("Starts Apple's freeform object capture without a selection box")
-            } else if coordinator.phase == .detecting {
-                Button("Reset", systemImage: "arrow.counterclockwise", action: coordinator.resetBoundingBox)
-                    .buttonStyle(.bordered)
-                    .frame(minHeight: 44)
-                Button("Use Box", systemImage: "checkmark", action: coordinator.confirmBoundingBox)
-                    .buttonStyle(.borderedProminent)
-                    .tint(StudioTheme.accent)
-                    .foregroundStyle(.black)
-                    .frame(minHeight: 44)
-            } else if coordinator.phase == .capturing {
-                Button(action: coordinator.takePhoto) {
-                    ZStack {
-                        Circle().stroke(.white.opacity(0.9), lineWidth: 3)
-                        Circle().fill(StudioTheme.accent).padding(6)
-                    }
-                    .frame(width: 62, height: 62)
-                }
-                .disabled(!coordinator.canTakePhoto)
-                .accessibilityLabel("Take photo")
-                .accessibilityHint(coordinator.canTakePhoto ? "Captures the current angle" : "Wait until the camera is ready")
-
-                Button(action: coordinator.advanceCaptureGuide) {
-                    compactControlLabel(
-                        LocalizedStringKey(coordinator.captureGuideActionTitle),
-                        systemImage: coordinator.captureGuideStage == .extraAngles || coordinator.reachedInputImageLimit
-                            ? "photo.stack"
-                            : "arrow.right"
-                    )
-                }
-                    .buttonStyle(.borderedProminent)
-                    .tint(StudioTheme.accent)
-                    .foregroundStyle(.black)
-                    .frame(minHeight: 44)
-                    .disabled(!coordinator.canAdvanceCaptureGuide)
-                    .accessibilityHint(coordinator.currentPassCompleted
-                        ? "Advances to the next guided capture pass"
-                        : "Complete the current Apple Object Capture pass first")
-            } else {
-                ProgressView().tint(StudioTheme.accent)
-            }
-        }
+        captureControlContent
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(.black.opacity(0.64), in: RoundedRectangle(cornerRadius: 18))
-        .allowsHitTesting(true)
+        .background {
+            RoundedRectangle(cornerRadius: 18)
+                .fill(Color.black.opacity(0.64))
+        }
+        .allowsHitTesting(CaptureOverlayInteractionPolicy.controlsAllowHitTesting)
+    }
+
+    @ViewBuilder
+    private var captureControlContent: some View {
+        if coordinator.phase == .readyForDetection {
+            detectionReadyControls
+        } else if coordinator.phase == .detecting {
+            boundingBoxControls
+        } else if coordinator.phase == .capturing {
+            activeCaptureControls
+        } else {
+            HStack(spacing: 8) {
+                cancelCaptureButton
+                ProgressView().tint(StudioTheme.accent)
+                Text("Saving photos…").font(.subheadline.weight(.semibold))
+            }
+        }
+    }
+
+    private var detectionReadyControls: some View {
+        HStack(spacing: 8) {
+            cancelCaptureButton
+            Button {
+                uiLogger.notice("UI_RETRY_TAPPED")
+                coordinator.retryDetection()
+            } label: {
+                compactControlLabel("Retry", systemImage: "viewfinder")
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(StudioTheme.accent)
+            .foregroundStyle(.black)
+            .frame(minHeight: 44)
+            .disabled(coordinator.isDetectionOperationPending)
+
+            Button {
+                uiLogger.notice("UI_SKIP_TAPPED")
+                coordinator.startFreeformCapture()
+            } label: {
+                compactControlLabel("Free Scan", systemImage: "arrow.right")
+            }
+            .buttonStyle(.bordered)
+            .frame(minHeight: 44)
+            .disabled(coordinator.isDetectionOperationPending)
+            .accessibilityHint("Starts Apple's freeform object capture without a selection box")
+        }
+    }
+
+    private var boundingBoxControls: some View {
+        HStack(spacing: 8) {
+            cancelCaptureButton
+            Button("Reset", systemImage: "arrow.counterclockwise", action: coordinator.resetBoundingBox)
+                .buttonStyle(.bordered)
+                .frame(minHeight: 44)
+            Button("Use Box", systemImage: "checkmark", action: coordinator.confirmBoundingBox)
+                .buttonStyle(.borderedProminent)
+                .tint(StudioTheme.accent)
+                .foregroundStyle(.black)
+                .frame(minHeight: 44)
+        }
+    }
+
+    private var activeCaptureControls: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Toggle("Auto", isOn: Binding(
+                    get: { coordinator.isAutoCaptureEnabled },
+                    set: { coordinator.setAutoCaptureEnabled($0) }
+                ))
+                .toggleStyle(.button)
+                .buttonStyle(.bordered)
+                .disabled(!coordinator.canChangeAutoCapture)
+
+                Button(action: coordinator.takePhoto) {
+                    compactControlLabel("Manual Photo", systemImage: "camera.shutter.button")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(StudioTheme.accent)
+                .foregroundStyle(.black)
+                .frame(minHeight: 44)
+                .disabled(!coordinator.canTakePhoto)
+
+                if coordinator.captureGuideStage != .extraAngles {
+                    Button(action: coordinator.advanceCaptureGuide) {
+                        compactControlLabel(
+                            LocalizedStringKey(coordinator.captureGuideStage == .overview ? "Detail" : "Angles"),
+                            systemImage: "arrow.right"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .frame(minHeight: 44)
+                    .disabled(!coordinator.canAdvanceCaptureGuide)
+                    .accessibilityLabel(coordinator.captureGuideActionTitle)
+                }
+
+                Button { showsCaptureSettings = true } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .frame(minWidth: 28, minHeight: 44)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Capture settings")
+            }
+            captureNavigationControls
+        }
+    }
+
+    private var captureNavigationControls: some View {
+        HStack(spacing: 8) {
+            cancelCaptureButton
+            Button {
+                if coordinator.isCapturePaused {
+                    coordinator.resumeCapture()
+                } else {
+                    coordinator.pauseCapture()
+                }
+            } label: {
+                compactControlLabel(
+                    LocalizedStringKey(coordinator.isCapturePaused ? "Resume" : "Pause"),
+                    systemImage: coordinator.isCapturePaused ? "play.fill" : "pause.fill"
+                )
+            }
+            .buttonStyle(.bordered)
+            .frame(minHeight: 44)
+            .disabled(coordinator.isCapturePaused ? !coordinator.canResumeCapture : !coordinator.canPauseCapture)
+
+            Button { showsFinishConfirmation = true } label: {
+                compactControlLabel("Finish & Review", systemImage: "checkmark")
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(StudioTheme.accent)
+            .foregroundStyle(.black)
+            .frame(minHeight: 44)
+            .disabled(!coordinator.canFinishCapture)
+        }
+    }
+
+    private var cancelCaptureButton: some View {
+        Button(role: .cancel) {
+            uiLogger.notice("UI_CANCEL_TAPPED")
+            coordinator.cancel()
+        } label: {
+            compactControlLabel("Cancel", systemImage: "xmark")
+        }
+        .buttonStyle(.bordered)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+        .accessibilityLabel("Cancel capture")
     }
 
     private func compactControlLabel(_ title: LocalizedStringKey, systemImage: String) -> some View {
@@ -207,6 +310,98 @@ struct ObjectStudioView: View {
             .lineLimit(1)
             .minimumScaleFactor(0.8)
             .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var captureFramingGuide: some View {
+        GeometryReader { proxy in
+            let guideWidth = proxy.size.width * framingGuideScale
+            let guideHeight = min(proxy.size.height * 0.48, guideWidth * 1.18)
+            ZStack {
+                RoundedRectangle(cornerRadius: 26)
+                    .stroke(
+                        StudioTheme.accent.opacity(0.82),
+                        style: StrokeStyle(lineWidth: 1.5, dash: [10, 7])
+                    )
+                    .frame(width: guideWidth, height: guideHeight)
+                Image(systemName: "plus")
+                    .font(.system(size: 22, weight: .light))
+                    .foregroundStyle(.white.opacity(0.9))
+                Text("Visual framing guide")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.82))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.black.opacity(0.55), in: Capsule())
+                    .offset(y: guideHeight / 2 + 18)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.top, proxy.safeAreaInsets.top + 72)
+            .padding(.bottom, proxy.safeAreaInsets.bottom + 128)
+        }
+        .allowsHitTesting(CaptureOverlayInteractionPolicy.framingGuideAllowsHitTesting)
+        .accessibilityHidden(true)
+    }
+
+    private var captureSettings: some View {
+        NavigationStack {
+            Form {
+                Section("Photo guidance") {
+                    Toggle("Preferred photo target", isOn: Binding(
+                        get: { coordinator.preferredPhotoTarget != nil },
+                        set: { enabled in
+                            coordinator.setPreferredPhotoTarget(enabled ? min(100, targetMaximum) : nil)
+                        }
+                    ))
+                    if let target = coordinator.preferredPhotoTarget {
+                        Stepper(
+                            "Target: \(target)",
+                            value: Binding(
+                                get: { target },
+                                set: { coordinator.setPreferredPhotoTarget($0) }
+                            ),
+                            in: 1...targetMaximum,
+                            step: min(5, targetMaximum)
+                        )
+                    }
+                    LabeledContent("Captured", value: "\(coordinator.photoCount)")
+                    LabeledContent("Framework maximum", value: "\(coordinator.maximumPhotoCount)")
+                    Text("The preferred target is guidance only. Reaching it does not finish capture, and it is not an Apple-defined minimum.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Section("Framing guide") {
+                    Slider(value: $framingGuideScale, in: 0.45...0.9) {
+                        Text("Guide size")
+                    }
+                    Text("This overlay is only a visual aid. It is not a detected bounding box and does not measure depth or coverage.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Capture Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showsCaptureSettings = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private var targetMaximum: Int {
+        max(1, coordinator.maximumPhotoCount)
+    }
+
+    private var finishConfirmationMessage: String {
+        if coordinator.photoCount == 0 {
+            return "No captured images have been reported. You can finish, but processing will remain unavailable unless valid images are saved."
+        }
+        if let target = coordinator.preferredPhotoTarget,
+           coordinator.photoCount < target {
+            return "Captured \(coordinator.photoCount) of your preferred \(target) photos. Finishing now may produce an incomplete reconstruction. This target is guidance, not an Apple-defined minimum."
+        }
+        return "Finish with \(coordinator.photoCount) captured photos? Apple Object Capture will save the available images before Review opens."
     }
 
     private var landingView: some View {
@@ -485,7 +680,8 @@ struct ObjectStudioView: View {
         case .preparing: "Preparing camera…"
         case .readyForDetection: "Aim at the surface beneath the object"
         case .detecting: "Adjust the box around the object"
-        case .capturing: coordinator.captureGuideStage.guidance
+        case .capturing:
+            coordinator.isCapturePaused ? "Capture paused" : coordinator.captureGuideStage.guidance
         case .finishing: "Saving photos…"
         default: "Object Capture"
         }
@@ -519,6 +715,8 @@ struct ObjectStudioView: View {
                 Label("Use soft, even light and avoid reflections.", systemImage: "light.max")
                 Label("Move slowly through low, middle, and high angles.", systemImage: "arrow.triangle.2.circlepath")
                 Label("Only the framework photo count is shown; coverage is not estimated.", systemImage: "checkmark.shield")
+                Label("Pause and resume keep the same capture session and saved-photo folder.", systemImage: "pause.circle")
+                Label("Finish & Review is always your explicit choice.", systemImage: "checkmark.circle")
             }
             .navigationTitle("Capture Help")
             .navigationBarTitleDisplayMode(.inline)
