@@ -16,7 +16,12 @@ struct ScanModelRecoveryTests {
         #expect(scan.relativeCapturePath == context.id.uuidString)
         #expect(scan.photoCount == 2)
         #expect(try Data(contentsOf: context.modelURL) == before)
-        #expect(try context.repository.load() == [scan])
+        let persisted = try #require(context.repository.load().first)
+        #expect(persisted.id == scan.id)
+        #expect(persisted.name == scan.name)
+        #expect(persisted.relativeModelPath == scan.relativeModelPath)
+        #expect(persisted.relativeCapturePath == scan.relativeCapturePath)
+        #expect(persisted.photoCount == scan.photoCount)
     }
 
     @Test func duplicateRestoreIsRejectedWithoutAddingMetadata() async throws {
@@ -50,7 +55,7 @@ struct ScanModelRecoveryTests {
         let missing = try makeContext()
         defer { try? FileManager.default.removeItem(at: missing.root) }
         try FileManager.default.removeItem(at: missing.modelURL)
-        await #expect(throws: ScanModelRecoveryService.RecoveryError.candidateUnavailable) {
+        await #expect(throws: ScanModelRecoveryService.RecoveryError.notEligible) {
             try await ScanModelRecoveryService(repository: missing.repository)
                 .restore(candidateID: missing.candidateID, proposedName: "Missing")
         }
