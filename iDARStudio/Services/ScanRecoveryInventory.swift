@@ -49,6 +49,20 @@ nonisolated struct RecoveryCandidate: Identifiable, Equatable, Sendable {
     let hasValidManifest: Bool
     let hasValidModel: Bool
     let validatedModelURL: URL?
+    let stableScanID: UUID?
+    let modelFileName: String?
+    let captureDirectoryName: String?
+    let captureCreatedAt: Date?
+    let manifestStatus: ObjectCaptureDraft.Status?
+
+    var canRestoreToLibrary: Bool {
+        classification == .validUnindexedModel
+            && eligibility == .metadataPreview
+            && hasValidModel
+            && validatedModelURL != nil
+            && stableScanID != nil
+            && modelFileName != nil
+    }
 }
 
 nonisolated struct RecoveryInventory: Equatable, Sendable {
@@ -89,6 +103,8 @@ nonisolated struct ScanRecoveryInventoryService: Sendable {
         let reconstructionIntermediateCount: Int
         let manifestIsValid: Bool
         let manifestExists: Bool
+        let manifestCreatedAt: Date?
+        let manifestStatus: ObjectCaptureDraft.Status?
         let limitation: String?
     }
 
@@ -139,7 +155,12 @@ nonisolated struct ScanRecoveryInventoryService: Sendable {
                 reconstructionIntermediateCount: capture?.reconstructionIntermediateCount ?? 0,
                 hasValidManifest: capture?.manifestIsValid ?? false,
                 hasValidModel: model?.isValidUSDZ ?? false,
-                validatedModelURL: model?.isValidUSDZ == true ? model?.url : nil
+                validatedModelURL: model?.isValidUSDZ == true ? model?.url : nil,
+                stableScanID: scan.id,
+                modelFileName: model?.fileName,
+                captureDirectoryName: capture?.directoryName,
+                captureCreatedAt: capture?.manifestCreatedAt,
+                manifestStatus: capture?.manifestStatus
             ))
         }
 
@@ -153,10 +174,14 @@ nonisolated struct ScanRecoveryInventoryService: Sendable {
             let eligibility: RecoveryEligibility
             let reason: String
 
-            if model?.isValidUSDZ == true {
+            if model?.isValidUSDZ == true, UUID(uuidString: key) != nil {
                 classification = .validUnindexedModel
                 eligibility = .metadataPreview
-                reason = "The USDZ container is valid but no current scan metadata references it. Recovery would require a name, scan type, dates, and validated model reference."
+                reason = "The USDZ passed local file validation, has a stable identifier, and is not referenced by current scan metadata. Restoration still requires explicit confirmation."
+            } else if model?.isValidUSDZ == true {
+                classification = .incompleteOrUnknown
+                eligibility = .inspectionOnly
+                reason = "The USDZ passed local file validation, but a stable scan identifier could not be recovered from its filename."
             } else if let capture, capture.originalImageCount > 0 {
                 classification = .captureDraftWithImages
                 eligibility = .reconstructionAssessment
@@ -194,7 +219,12 @@ nonisolated struct ScanRecoveryInventoryService: Sendable {
                 reconstructionIntermediateCount: capture?.reconstructionIntermediateCount ?? 0,
                 hasValidManifest: capture?.manifestIsValid ?? false,
                 hasValidModel: model?.isValidUSDZ ?? false,
-                validatedModelURL: model?.isValidUSDZ == true ? model?.url : nil
+                validatedModelURL: model?.isValidUSDZ == true ? model?.url : nil,
+                stableScanID: UUID(uuidString: key),
+                modelFileName: model?.fileName,
+                captureDirectoryName: capture?.directoryName,
+                captureCreatedAt: capture?.manifestCreatedAt,
+                manifestStatus: capture?.manifestStatus
             ))
         }
 
@@ -270,6 +300,8 @@ nonisolated struct ScanRecoveryInventoryService: Sendable {
                     reconstructionIntermediateCount: 0,
                     manifestIsValid: false,
                     manifestExists: false,
+                    manifestCreatedAt: nil,
+                    manifestStatus: nil,
                     limitation: "A non-directory or symbolic link was excluded from recovery inspection."
                 )
                 continue
@@ -285,7 +317,7 @@ nonisolated struct ScanRecoveryInventoryService: Sendable {
             includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey],
             options: [.skipsHiddenFiles, .skipsPackageDescendants]
         ) else {
-            return CaptureRecord(directoryName: directory.lastPathComponent, sizeBytes: 0, modifiedAt: initialDate, originalImageCount: 0, captureCheckpointCount: 0, reconstructionIntermediateCount: 0, manifestIsValid: false, manifestExists: false, limitation: "The capture directory could not be enumerated.")
+            return CaptureRecord(directoryName: directory.lastPathComponent, sizeBytes: 0, modifiedAt: initialDate, originalImageCount: 0, captureCheckpointCount: 0, reconstructionIntermediateCount: 0, manifestIsValid: false, manifestExists: false, manifestCreatedAt: nil, manifestStatus: nil, limitation: "The capture directory could not be enumerated.")
         }
 
         var bytes: Int64 = 0
@@ -324,27 +356,29 @@ nonisolated struct ScanRecoveryInventoryService: Sendable {
             reconstructionIntermediateCount: reconstructionCount,
             manifestIsValid: manifest.valid,
             manifestExists: manifest.exists,
+            manifestCreatedAt: manifest.draft?.createdAt,
+            manifestStatus: manifest.draft?.status,
             limitation: manifest.limitation
         )
     }
 
-    private func validateManifest(at url: URL) throws -> (exists: Bool, valid: Bool, limitation: String?) {
-        guard fileManager.fileExists(atPath: url.path) else { return (false, false, "The draft manifest is missing.") }
+    private func validateManifest(at url: URL) throws -> (exists: Bool, valid: Bool, draft: ObjectCaptureDraft?, limitation: String?) {
+        guard fileManager.fileExists(atPath: url.path) else { return (false, false, nil, "The draft manifest is missing.") }
         let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
         guard values.isRegularFile == true,
               values.isSymbolicLink != true,
               let size = values.fileSize,
               size > 0,
               size <= Self.maximumManifestBytes else {
-            return (true, false, "The draft manifest is unsafe or outside the supported size limit.")
+            return (true, false, nil, "The draft manifest is unsafe or outside the supported size limit.")
         }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         do {
-            _ = try decoder.decode(ObjectCaptureDraft.self, from: Data(contentsOf: url))
-            return (true, true, nil)
+            let draft = try decoder.decode(ObjectCaptureDraft.self, from: Data(contentsOf: url))
+            return (true, true, draft, nil)
         } catch {
-            return (true, false, "The draft manifest could not be validated.")
+            return (true, false, nil, "The draft manifest could not be validated.")
         }
     }
 

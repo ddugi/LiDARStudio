@@ -142,9 +142,10 @@ nonisolated struct LocalScanRepository: Sendable {
               FileManager.default.fileExists(atPath: resolved.path) else {
             return nil
         }
-        let values = try resolved.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
+        let values = try resolved.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey, .isReadableKey])
         guard values.isRegularFile == true,
               values.isSymbolicLink != true,
+              values.isReadable == true,
               (values.fileSize ?? 0) >= 64,
               try hasUSDZContainerSignature(at: resolved) else {
             return nil

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ScanRecoveryCenterView: View {
+    @EnvironmentObject private var library: ScanLibrary
     private enum LoadState {
         case loading
         case loaded(RecoveryInventory)
@@ -9,9 +10,14 @@ struct ScanRecoveryCenterView: View {
 
     @State private var state: LoadState = .loading
     private let service: ScanRecoveryInventoryService
+    private let recoveryService: ScanModelRecoveryService
 
-    init(service: ScanRecoveryInventoryService = ScanRecoveryInventoryService()) {
+    init(
+        service: ScanRecoveryInventoryService = ScanRecoveryInventoryService(),
+        recoveryService: ScanModelRecoveryService = ScanModelRecoveryService()
+    ) {
         self.service = service
+        self.recoveryService = recoveryService
     }
 
     var body: some View {
@@ -70,7 +76,13 @@ struct ScanRecoveryCenterView: View {
                     Section(classification.title) {
                         ForEach(candidates) { candidate in
                             NavigationLink {
-                                RecoveryCandidateDetailView(candidate: candidate)
+                                RecoveryCandidateDetailView(
+                                    candidate: candidate,
+                                    recoveryService: recoveryService
+                                ) {
+                                    library.reload()
+                                    Task { await load() }
+                                }
                             } label: {
                                 RecoveryCandidateRow(candidate: candidate)
                             }
@@ -124,7 +136,26 @@ private struct RecoveryCandidateRow: View {
 }
 
 private struct RecoveryCandidateDetailView: View {
+    @EnvironmentObject private var library: ScanLibrary
     let candidate: RecoveryCandidate
+    let recoveryService: ScanModelRecoveryService
+    let onRestored: () -> Void
+    @State private var proposedName: String
+    @State private var showConfirmation = false
+    @State private var isRestoring = false
+    @State private var resultMessage: String?
+    @State private var restoreSucceeded = false
+
+    init(
+        candidate: RecoveryCandidate,
+        recoveryService: ScanModelRecoveryService,
+        onRestored: @escaping () -> Void
+    ) {
+        self.candidate = candidate
+        self.recoveryService = recoveryService
+        self.onRestored = onRestored
+        _proposedName = State(initialValue: "Recovered Object \(candidate.safeIdentifier)")
+    }
 
     var body: some View {
         ZStack {
@@ -134,6 +165,9 @@ private struct RecoveryCandidateDetailView: View {
                     statusCard
                     factsCard
                     recoveryCard
+                    if candidate.canRestoreToLibrary, !restoreSucceeded {
+                        restoreControls
+                    }
                     if let modelURL = candidate.validatedModelURL {
                         NavigationLink {
                             USDZViewerView(modelURL: modelURL, title: candidate.displayName)
@@ -155,6 +189,12 @@ private struct RecoveryCandidateDetailView: View {
         }
         .navigationTitle(candidate.displayName)
         .navigationBarTitleDisplayMode(.inline)
+        .alert("Restore to My Scans?", isPresented: $showConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Restore") { restore() }
+        } message: {
+            Text("This adds one metadata record for \(proposedName). The original USDZ and capture files remain unchanged.")
+        }
     }
 
     private var statusCard: some View {
@@ -179,7 +219,13 @@ private struct RecoveryCandidateDetailView: View {
             detailRow("Capture checkpoints", "\(candidate.captureCheckpointCount)")
             detailRow("Reconstruction files", "\(candidate.reconstructionIntermediateCount)")
             detailRow("Valid manifest", candidate.hasValidManifest ? "Yes" : "No")
+            if let manifestStatus = candidate.manifestStatus {
+                detailRow("Manifest status", manifestStatus.rawValue)
+            }
             detailRow("Valid USDZ", candidate.hasValidModel ? "Yes" : "No")
+            if let captureCreatedAt = candidate.captureCreatedAt {
+                detailRow("Capture created", captureCreatedAt.formatted(date: .abbreviated, time: .shortened))
+            }
             if let modifiedAt = candidate.modifiedAt {
                 detailRow("Last modified", modifiedAt.formatted(date: .abbreviated, time: .shortened))
             }
@@ -194,17 +240,72 @@ private struct RecoveryCandidateDetailView: View {
                 .foregroundStyle(StudioTheme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             if candidate.classification == .validUnindexedModel {
-                Text("A future recovery action would need a user-selected name and scan type before creating a new metadata record. This preview does not perform that action.")
+                Text("Restoration creates a local Object scan metadata record using the validated model reference. It does not copy, move, rename, or delete source files.")
                     .font(.caption)
                     .foregroundStyle(StudioTheme.secondaryText)
             } else if candidate.classification == .captureDraftWithImages {
-                Text("Original images remain untouched. Reconstruction is not started automatically and may still fail if the capture is incomplete.")
+                Text("Original images remain untouched. No validated USDZ is currently available; reconstruction must be started separately and may still fail if required viewpoints or image quality are insufficient.")
                     .font(.caption)
                     .foregroundStyle(StudioTheme.secondaryText)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .studioCard()
+    }
+
+    private var restoreControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Restore metadata").font(.headline)
+            TextField("Scan name", text: $proposedName)
+                .textInputAutocapitalization(.words)
+                .padding(12)
+                .background(StudioTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 12))
+                .accessibilityLabel("Recovered scan name")
+            Button {
+                showConfirmation = true
+            } label: {
+                if isRestoring {
+                    ProgressView().frame(maxWidth: .infinity, minHeight: 44)
+                } else {
+                    Label("Restore to Library", systemImage: "plus.rectangle.on.folder")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(StudioTheme.accent)
+            .foregroundStyle(.black)
+            .disabled(isRestoring || proposedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            if let resultMessage {
+                Label(resultMessage, systemImage: restoreSucceeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(restoreSucceeded ? StudioTheme.accent : StudioTheme.warning)
+            }
+        }
+        .studioCard()
+    }
+
+    private func restore() {
+        guard !isRestoring else { return }
+        isRestoring = true
+        resultMessage = nil
+        Task {
+            do {
+                let scan = try await recoveryService.restore(candidateID: candidate.id, proposedName: proposedName)
+                await MainActor.run {
+                    restoreSucceeded = true
+                    resultMessage = "\(scan.name) was restored to My Scans."
+                    isRestoring = false
+                    library.reload()
+                    onRestored()
+                }
+            } catch {
+                await MainActor.run {
+                    restoreSucceeded = false
+                    resultMessage = error.localizedDescription
+                    isRestoring = false
+                }
+            }
+        }
     }
 
     private func detailRow(_ title: String, _ value: String) -> some View {
