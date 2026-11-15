@@ -4,7 +4,8 @@ Proprietary diagnostic material. Copyright © 2026 Dugi Selmanaj. All rights res
 
 ## Environment
 
-- Xcode 27.0 (27A266a), iOS 27.0 SDK
+- Initial reproduction: Xcode 27.0 (27A266a), iOS 27.0 SDK
+- Matching-toolchain reproduction: Xcode 27.3 beta (27C5020n), iOS 27.3 SDK
 - iOS 27.3 beta (24C5037i)
 - iPhone 18 Pro (`iPhone19,2`, arm64e.x1)
 - Developer Mode enabled; device unlocked
@@ -38,6 +39,20 @@ The app was installed under its separate bundle identifier and launched from
 signal 5 immediately after entering `ObjectCaptureSession.startCapturing()`.
 
 Minimal crash report: `ObjectCaptureMinimalRepro-2026-11-15-191212.ips`.
+
+## Matching Xcode 27.3 beta confirmation
+
+The isolated target was rebuilt and signed with Xcode 27.3 beta (27C5020n),
+whose iOS 27.3 SDK matches the device's iOS 27.3 beta release. The matching
+Developer Disk Image reported compatible and usable. The app was installed as
+the same separate diagnostic bundle and launched once with `--auto-freeform`,
+without Device Hub screen mirroring.
+
+It again terminated synchronously with signal 5. The new crash report,
+`ObjectCaptureMinimalRepro-2026-11-15-192535.ips`, has the same exception,
+program counter, faulting main thread, `_RealityKit_SwiftUI` UUID, and first
+three framework frames as the initial reproduction. This rules out the earlier
+Xcode 27.0/iOS 27.3 SDK mismatch as the cause of this freeform trap.
 
 ## Matching crash signature
 
