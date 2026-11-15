@@ -33,6 +33,17 @@ struct RoomCaptureLifecycleTests {
         #expect(lifecycle.phase == .saved)
     }
 
+    @Test func roomCaptureCanPrepareBeforeCaptureViewIsMounted() {
+        var lifecycle = RoomCaptureLifecycle()
+
+        lifecycle.attach()
+        let start = lifecycle.requestStart()
+
+        #expect(start)
+        #expect(lifecycle.phase == .starting)
+        #expect(lifecycle.keepsCaptureViewMounted)
+    }
+
     @Test func roomCaptureCancellationIsTerminalUntilReset() {
         var lifecycle = RoomCaptureLifecycle()
         lifecycle.attach()

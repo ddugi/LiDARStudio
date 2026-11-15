@@ -69,7 +69,6 @@ struct RoomStudioView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(StudioTheme.accent)
                 .foregroundStyle(.black)
-                .disabled(!capabilities.supportsRoomPlan || CameraPermission.current == .denied)
                 .accessibilityHint("Starts one RoomPlan camera session.")
             }
             .padding(20)

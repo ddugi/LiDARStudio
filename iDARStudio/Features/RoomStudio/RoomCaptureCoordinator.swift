@@ -61,6 +61,7 @@ final class RoomCaptureCoordinator: NSObject, ObservableObject {
 
     func startTapped() {
         Self.logger.info("ROOM_START_TAPPED")
+        lifecycle.attach()
         if CameraPermission.current == .authorized {
             prepareToStart()
             return
