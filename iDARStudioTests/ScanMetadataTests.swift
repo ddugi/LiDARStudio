@@ -66,12 +66,27 @@ struct ScanMetadataTests {
         #expect(ObjectStudioPhase.reviewing.progressStatus() == nil)
     }
 
-    @Test func multiDistanceGuideRequiresRealPassCompletionBeforeAdvancing() {
+    @Test func multiDistanceGuideAdvancesWithoutFabricatingFrameworkPassCompletion() {
         var workflow = ObjectCaptureGuideWorkflow()
         workflow.startCapturing()
 
         #expect(workflow.stage == .overview)
+        #expect(workflow.advance(mode: .objectCentric) == .advanceGuidanceOnly)
+        #expect(workflow.stage == .detail)
+        #expect(!workflow.currentPassCompleted)
+
+        #expect(workflow.advance(mode: .objectCentric) == .advanceGuidanceOnly)
+        #expect(workflow.stage == .extraAngles)
         #expect(workflow.advance(mode: .objectCentric) == .none)
+
+        workflow.beginReview()
+        workflow.beginProcessing()
+        #expect(workflow.stage == .process)
+    }
+
+    @Test func completedApplePassStartsANewObjectCentricFrameworkPass() {
+        var workflow = ObjectCaptureGuideWorkflow()
+        workflow.startCapturing()
 
         workflow.sessionReportedPassCompleted(true)
         #expect(workflow.advance(mode: .objectCentric) == .beginNewScanPass)
@@ -85,10 +100,6 @@ struct ScanMetadataTests {
         workflow.sessionReportedPassCompleted(true)
         #expect(workflow.advance(mode: .objectCentric) == .none)
         #expect(workflow.stage == .extraAngles)
-
-        workflow.beginReview()
-        workflow.beginProcessing()
-        #expect(workflow.stage == .process)
     }
 
     @Test func captureGuidanceExplicitlyCoversEverySideAndVerticalAngles() {

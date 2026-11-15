@@ -94,8 +94,9 @@ nonisolated struct ObjectCaptureGuideWorkflow: Equatable, Sendable {
 
     mutating func advance(mode: ObjectCaptureMode) -> AdvanceAction {
         guard stage == .overview || stage == .detail else { return .none }
-        if mode == .objectCentric, !currentPassCompleted { return .none }
-        let action: AdvanceAction = mode == .objectCentric ? .beginNewScanPass : .advanceGuidanceOnly
+        let action: AdvanceAction = mode == .objectCentric && currentPassCompleted
+            ? .beginNewScanPass
+            : .advanceGuidanceOnly
         switch stage {
         case .overview:
             stage = .detail

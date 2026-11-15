@@ -90,7 +90,7 @@ final class ObjectCaptureCoordinator: ObservableObject {
               !isCaptureControlPending,
               !isFinishOperationPending,
               captureGuideStage == .overview || captureGuideStage == .detail else { return false }
-        return captureMode == .freeform || currentPassCompleted
+        return true
     }
 
     var captureGuideActionTitle: String {
@@ -264,7 +264,7 @@ final class ObjectCaptureCoordinator: ObservableObject {
             logger.info("Beginning guided Object Capture pass \(self.captureGuideStage.title, privacy: .public)")
             session.beginNewScanPass()
         case .advanceGuidanceOnly:
-            logger.info("Advanced freeform guidance to \(self.captureGuideStage.title, privacy: .public) without starting a framework scan pass")
+            logger.info("Advanced capture guidance to \(self.captureGuideStage.title, privacy: .public) without resetting Apple's framework scan pass")
         case .none:
             break
         }
