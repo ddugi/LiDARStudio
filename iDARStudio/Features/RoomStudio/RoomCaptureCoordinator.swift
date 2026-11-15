@@ -1,3 +1,4 @@
+import ARKit
 import Combine
 import Foundation
 import OSLog
@@ -14,6 +15,8 @@ final class RoomCaptureCoordinator: NSObject, ObservableObject {
 
     @Published private(set) var lifecycle = RoomCaptureLifecycle()
     @Published private(set) var instructionText = "Move slowly and include every wall and corner."
+    @Published private(set) var trackingStatusText = "Waiting for ARKit tracking"
+    @Published private(set) var isGeometryOverlayEnabled = true
     @Published private(set) var liveSummary: Summary?
     @Published private(set) var roomSummary: Summary?
     @Published private(set) var errorMessage: String?
@@ -46,7 +49,7 @@ final class RoomCaptureCoordinator: NSObject, ObservableObject {
         captureView = view
         view.delegate = self
         view.captureSession.delegate = self
-        view.isModelEnabled = true
+        view.isModelEnabled = isGeometryOverlayEnabled
         lifecycle.attach()
         Self.logger.info("ROOM_VIEW_ATTACHED")
 
@@ -91,6 +94,7 @@ final class RoomCaptureCoordinator: NSObject, ObservableObject {
         }
         guard lifecycle.requestStart() else { return }
         errorMessage = nil
+        trackingStatusText = "Waiting for ARKit tracking"
         liveSummary = nil
         roomSummary = nil
         capturedRoom = nil
@@ -112,6 +116,13 @@ final class RoomCaptureCoordinator: NSObject, ObservableObject {
         captureView.captureSession.stop()
     }
 
+    func setGeometryOverlayEnabled(_ isEnabled: Bool) {
+        guard isGeometryOverlayEnabled != isEnabled else { return }
+        isGeometryOverlayEnabled = isEnabled
+        captureView?.isModelEnabled = isEnabled
+        Self.logger.info("ROOM_GEOMETRY_OVERLAY enabled=\(isEnabled)")
+    }
+
     func cancel() {
         guard lifecycle.isCaptureActive || lifecycle.phase == .processing else { return }
         let session = captureView?.captureSession
@@ -127,6 +138,7 @@ final class RoomCaptureCoordinator: NSObject, ObservableObject {
         saveTask?.cancel()
         saveTask = nil
         errorMessage = nil
+        trackingStatusText = "Waiting for ARKit tracking"
         liveSummary = nil
         roomSummary = nil
         capturedRoom = nil
@@ -220,6 +232,7 @@ extension RoomCaptureCoordinator: RoomCaptureSessionDelegate {
             guard let self, self.captureView?.captureSession === session else { return }
             self.lifecycle.confirmStarted()
             self.instructionText = "Move slowly and include every wall and corner."
+            self.updateTrackingStatus(for: session)
             Self.logger.info("ROOM_SESSION_STARTED")
         }
     }
@@ -232,6 +245,7 @@ extension RoomCaptureCoordinator: RoomCaptureSessionDelegate {
             guard let self, self.captureView?.captureSession === session,
                   self.lifecycle.phase == .capturing else { return }
             self.instructionText = instruction.userFacingText
+            self.updateTrackingStatus(for: session)
         }
     }
 
@@ -249,6 +263,7 @@ extension RoomCaptureCoordinator: RoomCaptureSessionDelegate {
             guard let self, self.captureView?.captureSession === session,
                   self.lifecycle.phase == .capturing,
                   self.liveSummary != summary else { return }
+            self.updateTrackingStatus(for: session)
             self.liveSummary = summary
             Self.logger.info(
                 "ROOM_GEOMETRY_UPDATED walls=\(summary.walls) doors=\(summary.doors) windows=\(summary.windows) objects=\(summary.objects)"
@@ -272,6 +287,14 @@ extension RoomCaptureCoordinator: RoomCaptureSessionDelegate {
                 Self.logger.info("ROOM_SESSION_ENDED")
             }
         }
+    }
+
+    private func updateTrackingStatus(for session: RoomCaptureSession) {
+        let status = session.arSession.currentFrame?.camera.trackingState.userFacingText
+            ?? "Waiting for the first ARKit frame"
+        guard trackingStatusText != status else { return }
+        trackingStatusText = status
+        Self.logger.info("ROOM_TRACKING_STATUS \(status, privacy: .public)")
     }
 }
 
@@ -316,6 +339,25 @@ private extension RoomCaptureSession.Instruction {
         case .normal: "Continue around the room and include every corner."
         case .lowTexture: "Point toward textured surfaces and visible edges."
         @unknown default: "Follow RoomPlan guidance and move slowly."
+        }
+    }
+}
+
+private extension ARCamera.TrackingState {
+    var userFacingText: String {
+        switch self {
+        case .normal:
+            "Tracking ready"
+        case .notAvailable:
+            "Tracking unavailable"
+        case .limited(let reason):
+            switch reason {
+            case .initializing: "Tracking initializing · move the phone slowly"
+            case .relocalizing: "Tracking relocalizing · revisit the scanned area"
+            case .excessiveMotion: "Tracking limited · move more slowly"
+            case .insufficientFeatures: "Tracking limited · point at textured walls and corners"
+            @unknown default: "Tracking limited"
+            }
         }
     }
 }

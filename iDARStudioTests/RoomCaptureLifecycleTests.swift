@@ -2,6 +2,17 @@ import Testing
 @testable import iDARStudio
 
 struct RoomCaptureLifecycleTests {
+    @Test @MainActor func roomGeometryOverlayCanBeChangedWithoutStartingCapture() {
+        let coordinator = RoomCaptureCoordinator()
+
+        #expect(coordinator.isGeometryOverlayEnabled)
+        coordinator.setGeometryOverlayEnabled(false)
+        #expect(!coordinator.isGeometryOverlayEnabled)
+        coordinator.setGeometryOverlayEnabled(true)
+        #expect(coordinator.isGeometryOverlayEnabled)
+        #expect(coordinator.lifecycle.phase == .idle)
+    }
+
     @Test func roomCaptureRequiresOrderedFrameworkTransitions() {
         var lifecycle = RoomCaptureLifecycle()
 

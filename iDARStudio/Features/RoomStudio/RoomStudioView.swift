@@ -105,9 +105,30 @@ struct RoomStudioView: View {
                         Text(coordinator.instructionText)
                             .font(.subheadline)
                             .foregroundStyle(.white.opacity(0.82))
+                        Text(coordinator.trackingStatusText)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.72))
+                        Text("Camera lens and zoom managed by RoomPlan")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.58))
                         roomProgressText
                     }
                     Spacer(minLength: 12)
+                    Button {
+                        coordinator.setGeometryOverlayEnabled(!coordinator.isGeometryOverlayEnabled)
+                    } label: {
+                        Image(systemName: coordinator.isGeometryOverlayEnabled
+                              ? "square.3.layers.3d.down.right.fill"
+                              : "square.3.layers.3d.down.right")
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(StudioTheme.accent)
+                    .accessibilityLabel(
+                        coordinator.isGeometryOverlayEnabled
+                        ? "Hide detected geometry edges"
+                        : "Show detected geometry edges"
+                    )
                 }
                 .padding(14)
                 .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 18))
