@@ -208,6 +208,8 @@ struct ScanMetadataTests {
     @Test func framingGuideCannotInterceptTouchesButControlsCan() {
         #expect(!CaptureOverlayInteractionPolicy.framingGuideAllowsHitTesting)
         #expect(CaptureOverlayInteractionPolicy.controlsAllowHitTesting)
+        #expect(CaptureOverlayInteractionPolicy.showsFramingGuide(for: .freeform))
+        #expect(!CaptureOverlayInteractionPolicy.showsFramingGuide(for: .objectCentric))
     }
 
     @Test func objectStudioWorkflowRejectsOutOfOrderTransitions() {
@@ -270,6 +272,43 @@ struct ScanMetadataTests {
         #expect(!automaticRetryStarted)
     }
 
+    @Test func objectCentricCaptureWaitsForFrameworkCapturingState() {
+        var lifecycle = readyDetectionLifecycle()
+        let retryStarted = lifecycle.beginRetry(frameworkStateIsReady: true)
+        #expect(retryStarted)
+        lifecycle.detectionRequestReturned(started: true)
+        lifecycle.sessionBecameDetecting()
+
+        let captureStarted = lifecycle.beginObjectCentricCapture(frameworkStateIsDetecting: true)
+        #expect(lifecycle.state == .awaitingCaptureState)
+        #expect(lifecycle.isOperationPending)
+        #expect(captureStarted)
+        let duplicateCaptureStarted = lifecycle.beginObjectCentricCapture(frameworkStateIsDetecting: true)
+        #expect(!duplicateCaptureStarted)
+
+        lifecycle.sessionBecameDetecting()
+        #expect(lifecycle.state == .awaitingCaptureState)
+
+        lifecycle.sessionBecameCapturing()
+        #expect(lifecycle.state == .capturing)
+        #expect(!lifecycle.isOperationPending)
+    }
+
+    @Test func freeformCaptureWaitsForFrameworkCapturingState() {
+        var lifecycle = readyDetectionLifecycle()
+
+        let captureStarted = lifecycle.beginFreeformCapture(frameworkStateIsReady: true)
+        #expect(lifecycle.state == .awaitingCaptureState)
+        #expect(lifecycle.isOperationPending)
+        #expect(captureStarted)
+        let duplicateCaptureStarted = lifecycle.beginFreeformCapture(frameworkStateIsReady: true)
+        #expect(!duplicateCaptureStarted)
+
+        lifecycle.sessionBecameCapturing()
+        #expect(lifecycle.state == .capturing)
+        #expect(!lifecycle.isOperationPending)
+    }
+
     @Test func cancellationWhileReadyIsTerminalForLateSessionEvents() {
         var lifecycle = readyDetectionLifecycle()
 
@@ -321,9 +360,11 @@ struct ScanMetadataTests {
         let validFreeformStarted = lifecycle.beginFreeformCapture(frameworkStateIsReady: true)
         #expect(!invalidFreeformStarted)
         #expect(validFreeformStarted)
-        #expect(lifecycle.state == .capturing)
+        #expect(lifecycle.state == .awaitingCaptureState)
         let retryStarted = lifecycle.beginRetry(frameworkStateIsReady: true)
         #expect(!retryStarted)
+        lifecycle.sessionBecameCapturing()
+        #expect(lifecycle.state == .capturing)
     }
 
     private func readyDetectionLifecycle() -> ObjectDetectionLifecycle {

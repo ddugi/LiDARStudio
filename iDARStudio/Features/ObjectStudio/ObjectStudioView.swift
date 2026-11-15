@@ -62,14 +62,14 @@ struct ObjectStudioView: View {
             ObjectCaptureView(session: session)
                 .ignoresSafeArea()
 
-            if coordinator.phase == .capturing {
+            if coordinator.phase == .capturing,
+               CaptureOverlayInteractionPolicy.showsFramingGuide(for: coordinator.captureMode) {
                 captureFramingGuide
                     .zIndex(0.5)
             }
 
             VStack(spacing: 12) {
                 captureHeader
-                Spacer()
                 if let feedback = coordinator.detectionRecoveryMessage ?? coordinator.feedbackMessage {
                     Text(feedback)
                         .font(.footnote.weight(.semibold))
@@ -81,6 +81,7 @@ struct ObjectStudioView: View {
                         .allowsHitTesting(false)
                         .transition(.opacity)
                 }
+                Spacer()
                 captureControls
             }
             .padding(.horizontal, 12)
@@ -206,14 +207,18 @@ struct ObjectStudioView: View {
     private var boundingBoxControls: some View {
         HStack(spacing: 8) {
             cancelCaptureButton
-            Button("Reset", systemImage: "arrow.counterclockwise", action: coordinator.resetBoundingBox)
+            Button("Identify Again", systemImage: "arrow.counterclockwise", action: coordinator.resetBoundingBox)
                 .buttonStyle(.bordered)
                 .frame(minHeight: 44)
+                .disabled(coordinator.isDetectionOperationPending)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
             Button("Use Box", systemImage: "checkmark", action: coordinator.confirmBoundingBox)
                 .buttonStyle(.borderedProminent)
                 .tint(StudioTheme.accent)
                 .foregroundStyle(.black)
                 .frame(minHeight: 44)
+                .disabled(coordinator.isDetectionOperationPending)
         }
     }
 
@@ -369,13 +374,21 @@ struct ObjectStudioView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
-                Section("Framing guide") {
-                    Slider(value: $framingGuideScale, in: 0.45...0.9) {
-                        Text("Guide size")
+                if coordinator.captureMode == .freeform {
+                    Section("Free Scan framing guide") {
+                        Slider(value: $framingGuideScale, in: 0.45...0.9) {
+                            Text("Guide size")
+                        }
+                        Text("This overlay is only a visual aid. It is not a detected bounding box and does not measure depth or coverage.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
-                    Text("This overlay is only a visual aid. It is not a detected bounding box and does not measure depth or coverage.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                } else {
+                    Section("Object framing") {
+                        Text("Apple's tracked 3D selection box is the framing reference for this scan. The separate screen-fixed guide is hidden because it cannot follow the detected object.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .navigationTitle("Capture Settings")
@@ -686,7 +699,10 @@ struct ObjectStudioView: View {
         switch coordinator.phase {
         case .preparing: "Preparing camera…"
         case .readyForDetection: "Aim at the surface beneath the object"
-        case .detecting: "Adjust the box around the object"
+        case .detecting:
+            coordinator.isDetectionOperationPending
+                ? "Starting capture with the selected box…"
+                : "Adjust Apple's box around the object"
         case .capturing:
             coordinator.isCapturePaused ? "Capture paused" : coordinator.captureGuideStage.guidance
         case .finishing: "Saving photos…"

@@ -192,18 +192,19 @@ final class ObjectCaptureCoordinator: ObservableObject {
     }
 
     func confirmBoundingBox() {
-        guard phase == .detecting, let session else { return }
+        guard phase == .detecting,
+              let session,
+              detectionLifecycle.beginObjectCentricCapture(
+                  frameworkStateIsDetecting: session.state == .detecting
+              ) else {
+            logger.notice("Ignored bounding-box confirmation because capture start is pending or the framework is no longer detecting")
+            return
+        }
+        updateDetectionOperationState()
         logger.info("User confirmed the Object Capture bounding box")
         captureMode = .objectCentric
-        captureGuideWorkflow.startCapturing()
-        updateCaptureGuideState()
-        captureControlLifecycle.beginCapture(
-            isPaused: session.isPaused,
-            isAutoCaptureEnabled: session.isAutoCaptureEnabled
-        )
-        updateCaptureControlState()
         session.startCapturing()
-        transition(to: .capturing)
+        logger.info("Waiting for Object Capture to confirm the capturing state")
     }
 
     func retryDetection() {
@@ -229,15 +230,8 @@ final class ObjectCaptureCoordinator: ObservableObject {
         detectionRecoveryMessage = nil
         logger.info("Starting supported freeform capture from Object Capture ready state")
         captureMode = .freeform
-        captureGuideWorkflow.startCapturing()
-        updateCaptureGuideState()
-        captureControlLifecycle.beginCapture(
-            isPaused: session.isPaused,
-            isAutoCaptureEnabled: session.isAutoCaptureEnabled
-        )
-        updateCaptureControlState()
         session.startCapturing()
-        transition(to: .capturing)
+        logger.info("Waiting for Object Capture to confirm the freeform capturing state")
     }
 
     func resetBoundingBox() {

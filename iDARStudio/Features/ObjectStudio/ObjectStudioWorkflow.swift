@@ -236,6 +236,10 @@ nonisolated enum PhotoTargetPreference {
 nonisolated enum CaptureOverlayInteractionPolicy {
     static let framingGuideAllowsHitTesting = false
     static let controlsAllowHitTesting = true
+
+    static func showsFramingGuide(for mode: ObjectCaptureMode) -> Bool {
+        mode == .freeform
+    }
 }
 
 nonisolated struct ObjectCapturePhotoProgress: Equatable, Sendable {
@@ -337,6 +341,7 @@ nonisolated struct ObjectDetectionLifecycle: Equatable, Sendable {
         case invokingDetection
         case awaitingDetectionState
         case detecting
+        case awaitingCaptureState
         case capturing
         case cancelled
     }
@@ -345,7 +350,9 @@ nonisolated struct ObjectDetectionLifecycle: Equatable, Sendable {
     private(set) var automaticRequestAttempted = false
 
     var isOperationPending: Bool {
-        state == .invokingDetection || state == .awaitingDetectionState
+        state == .invokingDetection ||
+            state == .awaitingDetectionState ||
+            state == .awaitingCaptureState
     }
 
     mutating func prepareNewSession() {
@@ -355,7 +362,7 @@ nonisolated struct ObjectDetectionLifecycle: Equatable, Sendable {
 
     mutating func sessionBecameReady() -> Bool {
         switch state {
-        case .awaitingDetectionState, .capturing, .cancelled:
+        case .awaitingDetectionState, .awaitingCaptureState, .capturing, .cancelled:
             return false
         default:
             state = .ready
@@ -385,13 +392,21 @@ nonisolated struct ObjectDetectionLifecycle: Equatable, Sendable {
     }
 
     mutating func sessionBecameDetecting() {
-        guard state != .cancelled, state != .capturing else { return }
+        guard state != .cancelled,
+              state != .awaitingCaptureState,
+              state != .capturing else { return }
         state = .detecting
     }
 
     mutating func beginFreeformCapture(frameworkStateIsReady: Bool) -> Bool {
         guard frameworkStateIsReady, state == .ready else { return false }
-        state = .capturing
+        state = .awaitingCaptureState
+        return true
+    }
+
+    mutating func beginObjectCentricCapture(frameworkStateIsDetecting: Bool) -> Bool {
+        guard frameworkStateIsDetecting, state == .detecting else { return false }
+        state = .awaitingCaptureState
         return true
     }
 
