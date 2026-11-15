@@ -99,6 +99,21 @@ stateDiagram-v2
 prevents stale callbacks from reviving a cancelled session. Framework callbacks
 are accepted only from the currently observed session.
 
+`ObjectCaptureControlLifecycle` independently serializes pause, resume, and
+finish. SwiftUI does not report a pause until `isPausedUpdates` confirms it. A
+finish requested while paused resumes the same session, waits for the confirmed
+unpaused state, and then calls `finish()` once. Manual capture is enabled only
+when `canRequestImageCapture` is true and the framework maximum has not been
+reached. The optional preferred photo target is local guidance and never drives
+automatic completion.
+
+Object-centric guidance may call `beginNewScanPass()` only after the framework
+reports `userCompletedScanPass`. Freeform guidance changes only the displayed
+Overview, Detail, and Extra Angles instructions. Review begins only after the
+active session reports `.completed` and saved image files are enumerated. The
+center guide rectangle is a non-hit-testing visual overlay, not a physical
+bounding box, coverage estimate, or depth measurement.
+
 Capture originals are preserved in a draft workspace. Reconstruction uses a
 separate `PhotogrammetrySession`, writes a candidate USDZ, validates the output,
 then creates library metadata. A false detection result is recoverable and is

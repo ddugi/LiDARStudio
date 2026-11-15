@@ -71,32 +71,145 @@ struct ScanMetadataTests {
         workflow.startCapturing()
 
         #expect(workflow.stage == .overview)
-        #expect(workflow.advance() == .none)
+        #expect(workflow.advance(mode: .objectCentric) == .none)
 
         workflow.sessionReportedPassCompleted(true)
-        #expect(workflow.advance() == .beginNewScanPass)
+        #expect(workflow.advance(mode: .objectCentric) == .beginNewScanPass)
         #expect(workflow.stage == .detail)
         #expect(!workflow.currentPassCompleted)
 
         workflow.sessionReportedPassCompleted(true)
-        #expect(workflow.advance() == .beginNewScanPass)
+        #expect(workflow.advance(mode: .objectCentric) == .beginNewScanPass)
         #expect(workflow.stage == .extraAngles)
 
         workflow.sessionReportedPassCompleted(true)
-        #expect(workflow.advance() == .finishCapture)
-        #expect(workflow.stage == .review)
+        #expect(workflow.advance(mode: .objectCentric) == .none)
+        #expect(workflow.stage == .extraAngles)
 
+        workflow.beginReview()
         workflow.beginProcessing()
         #expect(workflow.stage == .process)
     }
 
-    @Test func imageLimitFinishesCurrentCaptureWithoutFabricatingCoverage() {
+    @Test func captureGuidanceExplicitlyCoversEverySideAndVerticalAngles() {
+        #expect(ObjectCaptureGuideStage.overview.guidance.contains("every side"))
+        #expect(ObjectCaptureGuideStage.detail.guidance.contains("every side"))
+
+        let extraAngleRoute = ObjectCaptureGuideStage.extraAngles.routeSteps
+            .joined(separator: " ")
+            .lowercased()
+        #expect(extraAngleRoute.contains("high orbit"))
+        #expect(extraAngleRoute.contains("low orbit"))
+        #expect(extraAngleRoute.contains("oblique"))
+        #expect(extraAngleRoute.contains("instead of rolling"))
+
+        let allGuidance = ObjectCaptureGuideStage.allCases
+            .flatMap(\.routeSteps)
+            .joined(separator: " ")
+            .lowercased()
+        #expect(!allGuidance.contains("coverage percentage"))
+        #expect(!allGuidance.contains("complete coverage"))
+    }
+
+    @Test func freeformGuidanceNeverStartsAFrameworkScanPassOrFinishesAutomatically() {
         var workflow = ObjectCaptureGuideWorkflow()
         workflow.startCapturing()
 
-        #expect(!workflow.currentPassCompleted)
-        #expect(workflow.advance(reachedImageLimit: true) == .finishCapture)
-        #expect(workflow.stage == .review)
+        #expect(workflow.advance(mode: .freeform) == .advanceGuidanceOnly)
+        #expect(workflow.stage == .detail)
+        #expect(workflow.advance(mode: .freeform) == .advanceGuidanceOnly)
+        #expect(workflow.stage == .extraAngles)
+        #expect(workflow.advance(mode: .freeform) == .none)
+    }
+
+    @Test func captureControlPauseResumeWaitsForFrameworkConfirmation() {
+        var lifecycle = ObjectCaptureControlLifecycle()
+        lifecycle.beginCapture(isPaused: false, isAutoCaptureEnabled: true)
+
+        #expect(lifecycle.requestPause(frameworkStateIsCapturing: true) == .pause)
+        #expect(lifecycle.state == .pausePending)
+        #expect(!lifecycle.isPaused)
+        #expect(lifecycle.requestPause(frameworkStateIsCapturing: true) == .none)
+        #expect(lifecycle.sessionReportedPaused(false) == .none)
+        #expect(lifecycle.state == .pausePending)
+
+        #expect(lifecycle.sessionReportedPaused(true) == .none)
+        #expect(lifecycle.state == .paused)
+        #expect(lifecycle.isPaused)
+        #expect(lifecycle.requestResume(frameworkStateIsCapturing: true) == .resume)
+        #expect(lifecycle.state == .resumePending)
+        #expect(lifecycle.sessionReportedPaused(false) == .none)
+        #expect(lifecycle.state == .capturing)
+    }
+
+    @Test func earlyFinishIsExplicitAndDuplicateFinishIsRejected() {
+        var lifecycle = ObjectCaptureControlLifecycle()
+        lifecycle.beginCapture(isPaused: false, isAutoCaptureEnabled: true)
+
+        #expect(lifecycle.requestFinish(frameworkStateIsCapturing: true) == .finish)
+        #expect(lifecycle.state == .finishing)
+        #expect(lifecycle.requestFinish(frameworkStateIsCapturing: true) == .none)
+    }
+
+    @Test func finishingWhilePausedResumesBeforeFinishing() {
+        var lifecycle = ObjectCaptureControlLifecycle()
+        lifecycle.beginCapture(isPaused: true, isAutoCaptureEnabled: false)
+
+        #expect(lifecycle.requestFinish(frameworkStateIsCapturing: true) == .resume)
+        #expect(lifecycle.state == .resumeToFinishPending)
+        #expect(lifecycle.sessionReportedPaused(false) == .finish)
+        #expect(lifecycle.state == .finishing)
+    }
+
+    @Test func automaticAndManualCaptureRespectActualControlState() {
+        var lifecycle = ObjectCaptureControlLifecycle()
+        lifecycle.beginCapture(isPaused: false, isAutoCaptureEnabled: true)
+
+        let automaticModeChanged = lifecycle.setAutoCaptureEnabled(
+            false,
+            frameworkStateIsCapturing: true
+        )
+        #expect(automaticModeChanged)
+        #expect(!lifecycle.isAutoCaptureEnabled)
+        #expect(lifecycle.canRequestManualPhoto(frameworkAllowsCapture: true, reachedMaximum: false))
+        #expect(!lifecycle.canRequestManualPhoto(frameworkAllowsCapture: false, reachedMaximum: false))
+        #expect(!lifecycle.canRequestManualPhoto(frameworkAllowsCapture: true, reachedMaximum: true))
+
+        #expect(lifecycle.requestPause(frameworkStateIsCapturing: true) == .pause)
+        #expect(!lifecycle.canRequestManualPhoto(frameworkAllowsCapture: true, reachedMaximum: false))
+    }
+
+    @Test func realPhotoProgressUsesFrameworkMaximumAndUserTargetOnlyAsGuidance() {
+        let belowTarget = ObjectCapturePhotoProgress(captured: 12, maximum: 250, preferredTarget: 40)
+        #expect(!belowTarget.reachedMaximum)
+        #expect(belowTarget.isBelowPreferredTarget)
+        #expect(belowTarget.shouldWarnBeforeFinish)
+
+        let reachedTarget = ObjectCapturePhotoProgress(captured: 40, maximum: 250, preferredTarget: 40)
+        #expect(!reachedTarget.reachedMaximum)
+        #expect(!reachedTarget.shouldWarnBeforeFinish)
+
+        let maximum = ObjectCapturePhotoProgress(captured: 250, maximum: 250, preferredTarget: nil)
+        #expect(maximum.reachedMaximum)
+        #expect(!maximum.shouldWarnBeforeFinish)
+    }
+
+    @Test func preferredPhotoTargetPersistsAndCanBeDisabled() throws {
+        let suiteName = "PhotoTargetPreferenceTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        PhotoTargetPreference.write(85, to: defaults)
+        #expect(PhotoTargetPreference.read(from: defaults) == 85)
+        PhotoTargetPreference.write(nil, to: defaults)
+        #expect(PhotoTargetPreference.read(from: defaults) == nil)
+    }
+
+    @Test func framingGuideCannotInterceptTouchesButControlsCan() {
+        #expect(!CaptureOverlayInteractionPolicy.framingGuideAllowsHitTesting)
+        #expect(CaptureOverlayInteractionPolicy.controlsAllowHitTesting)
+        #expect(CaptureOverlayInteractionPolicy.showsFramingGuide(for: .freeform))
+        #expect(!CaptureOverlayInteractionPolicy.showsFramingGuide(for: .objectCentric))
     }
 
     @Test func objectStudioWorkflowRejectsOutOfOrderTransitions() {
@@ -159,6 +272,43 @@ struct ScanMetadataTests {
         #expect(!automaticRetryStarted)
     }
 
+    @Test func objectCentricCaptureWaitsForFrameworkCapturingState() {
+        var lifecycle = readyDetectionLifecycle()
+        let retryStarted = lifecycle.beginRetry(frameworkStateIsReady: true)
+        #expect(retryStarted)
+        lifecycle.detectionRequestReturned(started: true)
+        lifecycle.sessionBecameDetecting()
+
+        let captureStarted = lifecycle.beginObjectCentricCapture(frameworkStateIsDetecting: true)
+        #expect(lifecycle.state == .awaitingCaptureState)
+        #expect(lifecycle.isOperationPending)
+        #expect(captureStarted)
+        let duplicateCaptureStarted = lifecycle.beginObjectCentricCapture(frameworkStateIsDetecting: true)
+        #expect(!duplicateCaptureStarted)
+
+        lifecycle.sessionBecameDetecting()
+        #expect(lifecycle.state == .awaitingCaptureState)
+
+        lifecycle.sessionBecameCapturing()
+        #expect(lifecycle.state == .capturing)
+        #expect(!lifecycle.isOperationPending)
+    }
+
+    @Test func freeformCaptureWaitsForFrameworkCapturingState() {
+        var lifecycle = readyDetectionLifecycle()
+
+        let captureStarted = lifecycle.beginFreeformCapture(frameworkStateIsReady: true)
+        #expect(lifecycle.state == .awaitingCaptureState)
+        #expect(lifecycle.isOperationPending)
+        #expect(captureStarted)
+        let duplicateCaptureStarted = lifecycle.beginFreeformCapture(frameworkStateIsReady: true)
+        #expect(!duplicateCaptureStarted)
+
+        lifecycle.sessionBecameCapturing()
+        #expect(lifecycle.state == .capturing)
+        #expect(!lifecycle.isOperationPending)
+    }
+
     @Test func cancellationWhileReadyIsTerminalForLateSessionEvents() {
         var lifecycle = readyDetectionLifecycle()
 
@@ -210,9 +360,11 @@ struct ScanMetadataTests {
         let validFreeformStarted = lifecycle.beginFreeformCapture(frameworkStateIsReady: true)
         #expect(!invalidFreeformStarted)
         #expect(validFreeformStarted)
-        #expect(lifecycle.state == .capturing)
+        #expect(lifecycle.state == .awaitingCaptureState)
         let retryStarted = lifecycle.beginRetry(frameworkStateIsReady: true)
         #expect(!retryStarted)
+        lifecycle.sessionBecameCapturing()
+        #expect(lifecycle.state == .capturing)
     }
 
     private func readyDetectionLifecycle() -> ObjectDetectionLifecycle {
@@ -253,6 +405,27 @@ struct ScanMetadataTests {
         try repository.saveObjectCaptureDraft(draft)
 
         #expect(try repository.loadObjectCaptureDraft(id: draft.id) == draft)
+    }
+
+    @Test func failedCaptureManifestPreservesOriginalImages() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = LocalScanRepository(rootDirectory: root)
+        let id = UUID()
+        let workspace = try repository.createObjectCaptureWorkspace(id: id)
+        let image = workspace.imagesDirectory.appending(path: "IMG_0001.heic")
+        try Data(repeating: 0x2A, count: 128).write(to: image)
+        let failedDraft = ObjectCaptureDraft(id: id, photoCount: 1, status: .failed)
+
+        try repository.saveObjectCaptureDraft(failedDraft)
+
+        let reloadedDraft = try repository.loadObjectCaptureDraft(id: id)
+        #expect(reloadedDraft.id == id)
+        #expect(reloadedDraft.status == .failed)
+        #expect(reloadedDraft.photoCount == 1)
+        #expect(FileManager.default.fileExists(atPath: image.path))
+        #expect(try repository.capturedImageURLs(id: id) == [image])
     }
 
     @Test func modelOutputStaysInsideLocalModelsDirectory() throws {

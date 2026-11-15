@@ -30,19 +30,52 @@ nonisolated enum ObjectCaptureGuideStage: Int, CaseIterable, Equatable, Sendable
 
     var guidance: String {
         switch self {
-        case .overview: "Keep the whole object visible and maintain image overlap."
-        case .detail: "Move closer for detail. Move back if the object loses focus."
-        case .extraAngles: "Capture higher, lower, and oblique views. Move slowly."
+        case .overview: "Level orbit: circle every side with the whole object visible."
+        case .detail: "Detail orbit: move closer and repeat every side with overlap."
+        case .extraAngles: "High orbit, then low orbit. Aim down and up without rolling the phone."
         case .review: "Review the actual captured photos before processing."
         case .process: "Create the model from the preserved original photos."
         }
     }
+
+    var routeSteps: [String] {
+        switch self {
+        case .overview:
+            [
+                "Walk one complete level orbit around every side.",
+                "Keep the entire object visible and centered.",
+                "Move slowly and maintain overlap between viewpoints."
+            ]
+        case .detail:
+            [
+                "Repeat a complete orbit closer to the object.",
+                "Capture texture, markings, edges, and small geometry.",
+                "Move back whenever the object becomes soft or leaves the frame."
+            ]
+        case .extraAngles:
+            [
+                "Raise the phone and complete a high orbit angled downward.",
+                "Lower the phone and complete a low orbit angled upward.",
+                "Add oblique views of corners and recessed surfaces.",
+                "Keep the phone upright; change height instead of rolling it sideways."
+            ]
+        case .review:
+            ["Review the real captured images before creating the model."]
+        case .process:
+            ["Create the model from the preserved original photographs."]
+        }
+    }
+}
+
+nonisolated enum ObjectCaptureMode: Equatable, Sendable {
+    case objectCentric
+    case freeform
 }
 
 nonisolated struct ObjectCaptureGuideWorkflow: Equatable, Sendable {
     enum AdvanceAction: Equatable, Sendable {
         case beginNewScanPass
-        case finishCapture
+        case advanceGuidanceOnly
         case none
     }
 
@@ -59,28 +92,20 @@ nonisolated struct ObjectCaptureGuideWorkflow: Equatable, Sendable {
         currentPassCompleted = completed
     }
 
-    mutating func advance(reachedImageLimit: Bool = false) -> AdvanceAction {
-        guard currentPassCompleted || reachedImageLimit else { return .none }
-        if reachedImageLimit {
-            stage = .review
-            currentPassCompleted = false
-            return .finishCapture
-        }
-
+    mutating func advance(mode: ObjectCaptureMode) -> AdvanceAction {
+        guard stage == .overview || stage == .detail else { return .none }
+        if mode == .objectCentric, !currentPassCompleted { return .none }
+        let action: AdvanceAction = mode == .objectCentric ? .beginNewScanPass : .advanceGuidanceOnly
         switch stage {
         case .overview:
             stage = .detail
             currentPassCompleted = false
-            return .beginNewScanPass
+            return action
         case .detail:
             stage = .extraAngles
             currentPassCompleted = false
-            return .beginNewScanPass
-        case .extraAngles:
-            stage = .review
-            currentPassCompleted = false
-            return .finishCapture
-        case .review, .process:
+            return action
+        case .extraAngles, .review, .process:
             return .none
         }
     }
@@ -94,6 +119,140 @@ nonisolated struct ObjectCaptureGuideWorkflow: Equatable, Sendable {
         guard stage == .review else { return }
         stage = .process
     }
+}
+
+nonisolated struct ObjectCaptureControlLifecycle: Equatable, Sendable {
+    enum State: Equatable, Sendable {
+        case inactive
+        case capturing
+        case pausePending
+        case paused
+        case resumePending
+        case resumeToFinishPending
+        case finishing
+    }
+
+    enum Action: Equatable, Sendable {
+        case none
+        case pause
+        case resume
+        case finish
+    }
+
+    private(set) var state: State = .inactive
+    private(set) var isAutoCaptureEnabled = true
+
+    var isPaused: Bool { state == .paused || state == .resumeToFinishPending }
+    var isTransitionPending: Bool {
+        state == .pausePending || state == .resumePending || state == .resumeToFinishPending
+    }
+    var isFinishPending: Bool { state == .resumeToFinishPending || state == .finishing }
+
+    mutating func beginCapture(isPaused: Bool, isAutoCaptureEnabled: Bool) {
+        state = isPaused ? .paused : .capturing
+        self.isAutoCaptureEnabled = isAutoCaptureEnabled
+    }
+
+    mutating func requestPause(frameworkStateIsCapturing: Bool) -> Action {
+        guard frameworkStateIsCapturing, state == .capturing else { return .none }
+        state = .pausePending
+        return .pause
+    }
+
+    mutating func requestResume(frameworkStateIsCapturing: Bool) -> Action {
+        guard frameworkStateIsCapturing, state == .paused else { return .none }
+        state = .resumePending
+        return .resume
+    }
+
+    mutating func requestFinish(frameworkStateIsCapturing: Bool) -> Action {
+        guard frameworkStateIsCapturing else { return .none }
+        switch state {
+        case .capturing:
+            state = .finishing
+            return .finish
+        case .paused:
+            state = .resumeToFinishPending
+            return .resume
+        default:
+            return .none
+        }
+    }
+
+    mutating func sessionReportedPaused(_ paused: Bool) -> Action {
+        if paused {
+            guard state == .pausePending || state == .capturing else { return .none }
+            state = .paused
+            return .none
+        }
+
+        switch state {
+        case .resumePending, .paused:
+            state = .capturing
+            return .none
+        case .pausePending:
+            return .none
+        case .resumeToFinishPending:
+            state = .finishing
+            return .finish
+        default:
+            return .none
+        }
+    }
+
+    mutating func setAutoCaptureEnabled(_ enabled: Bool, frameworkStateIsCapturing: Bool) -> Bool {
+        guard frameworkStateIsCapturing,
+              state == .capturing || state == .paused else { return false }
+        isAutoCaptureEnabled = enabled
+        return true
+    }
+
+    mutating func sessionBeganFinishing() {
+        state = .finishing
+    }
+
+    func canRequestManualPhoto(frameworkAllowsCapture: Bool, reachedMaximum: Bool) -> Bool {
+        state == .capturing && frameworkAllowsCapture && !reachedMaximum
+    }
+
+    mutating func reset() {
+        state = .inactive
+    }
+}
+
+nonisolated enum PhotoTargetPreference {
+    static let key = "objectCapturePreferredPhotoTarget"
+
+    static func read(from defaults: UserDefaults) -> Int? {
+        let value = defaults.integer(forKey: key)
+        return value > 0 ? value : nil
+    }
+
+    static func write(_ value: Int?, to defaults: UserDefaults) {
+        defaults.set(max(0, value ?? 0), forKey: key)
+    }
+}
+
+nonisolated enum CaptureOverlayInteractionPolicy {
+    static let framingGuideAllowsHitTesting = false
+    static let controlsAllowHitTesting = true
+
+    static func showsFramingGuide(for mode: ObjectCaptureMode) -> Bool {
+        mode == .freeform
+    }
+}
+
+nonisolated struct ObjectCapturePhotoProgress: Equatable, Sendable {
+    let captured: Int
+    let maximum: Int
+    let preferredTarget: Int?
+
+    var reachedMaximum: Bool { maximum > 0 && captured >= maximum }
+    var isBelowPreferredTarget: Bool {
+        guard let preferredTarget else { return false }
+        return captured < preferredTarget
+    }
+    var shouldWarnBeforeFinish: Bool { captured == 0 || isBelowPreferredTarget }
 }
 
 nonisolated enum ObjectStudioPhase: Equatable, Sendable {
@@ -182,6 +341,7 @@ nonisolated struct ObjectDetectionLifecycle: Equatable, Sendable {
         case invokingDetection
         case awaitingDetectionState
         case detecting
+        case awaitingCaptureState
         case capturing
         case cancelled
     }
@@ -190,7 +350,9 @@ nonisolated struct ObjectDetectionLifecycle: Equatable, Sendable {
     private(set) var automaticRequestAttempted = false
 
     var isOperationPending: Bool {
-        state == .invokingDetection || state == .awaitingDetectionState
+        state == .invokingDetection ||
+            state == .awaitingDetectionState ||
+            state == .awaitingCaptureState
     }
 
     mutating func prepareNewSession() {
@@ -200,7 +362,7 @@ nonisolated struct ObjectDetectionLifecycle: Equatable, Sendable {
 
     mutating func sessionBecameReady() -> Bool {
         switch state {
-        case .awaitingDetectionState, .capturing, .cancelled:
+        case .awaitingDetectionState, .awaitingCaptureState, .capturing, .cancelled:
             return false
         default:
             state = .ready
@@ -230,13 +392,21 @@ nonisolated struct ObjectDetectionLifecycle: Equatable, Sendable {
     }
 
     mutating func sessionBecameDetecting() {
-        guard state != .cancelled, state != .capturing else { return }
+        guard state != .cancelled,
+              state != .awaitingCaptureState,
+              state != .capturing else { return }
         state = .detecting
     }
 
     mutating func beginFreeformCapture(frameworkStateIsReady: Bool) -> Bool {
         guard frameworkStateIsReady, state == .ready else { return false }
-        state = .capturing
+        state = .awaitingCaptureState
+        return true
+    }
+
+    mutating func beginObjectCentricCapture(frameworkStateIsDetecting: Bool) -> Bool {
+        guard frameworkStateIsDetecting, state == .detecting else { return false }
+        state = .awaitingCaptureState
         return true
     }
 

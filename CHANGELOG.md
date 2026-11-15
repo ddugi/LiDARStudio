@@ -5,6 +5,19 @@ work, not App Store releases.
 
 ## Unreleased
 
+### User-controlled Object Capture
+
+- Added framework-backed pause, resume, manual photo, automatic-capture, and
+  explicit Finish & Review controls without changing detection or rendering.
+- Added the real `numberOfShotsTaken` count, framework maximum, and an optional
+  persisted preferred target that never auto-finishes capture.
+- Added safe finish-while-paused sequencing, duplicate-operation guards, and
+  freeform guidance that does not invoke object-centric scan-pass APIs.
+- Added a noninteractive adjustable framing guide and early-finish warnings
+  that do not claim coverage, quality, depth, or an Apple-defined minimum.
+- Added state-machine, persistence, hit-testing, and failed-draft image
+  preservation tests.
+
 ### Product experience
 
 - Added a repository-driven home dashboard with real scan counts, recent

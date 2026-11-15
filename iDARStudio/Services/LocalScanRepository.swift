@@ -28,10 +28,13 @@ nonisolated struct LocalScanRepository: Sendable {
 
     init(rootDirectory: URL? = nil) {
         if let rootDirectory {
-            self.rootDirectory = rootDirectory.standardizedFileURL
+            self.rootDirectory = rootDirectory.standardizedFileURL.resolvingSymlinksInPath()
         } else {
             let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            self.rootDirectory = documents.appending(path: "LiDARStudio", directoryHint: .isDirectory)
+            self.rootDirectory = documents
+                .appending(path: "LiDARStudio", directoryHint: .isDirectory)
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
         }
     }
 
@@ -114,7 +117,8 @@ nonisolated struct LocalScanRepository: Sendable {
 
     func modelFileURL(id: UUID) throws -> URL {
         try prepareDirectories()
-        return modelsDirectory.appending(path: "\(id.uuidString).usdz")
+        return modelsDirectory.resolvingSymlinksInPath()
+            .appending(path: "\(id.uuidString).usdz")
     }
 
     func modelURL(for scan: ScanMetadata) throws -> URL? {
@@ -124,8 +128,9 @@ nonisolated struct LocalScanRepository: Sendable {
               !relativePath.contains("/") && !relativePath.contains("\\") else {
             throw RepositoryError.invalidModelPath
         }
-        let resolved = modelsDirectory.appending(path: relativePath).standardizedFileURL
-        guard resolved.deletingLastPathComponent() == modelsDirectory.standardizedFileURL else {
+        let canonicalDirectory = modelsDirectory.resolvingSymlinksInPath()
+        let resolved = canonicalDirectory.appending(path: relativePath).standardizedFileURL
+        guard resolved.deletingLastPathComponent() == canonicalDirectory else {
             throw RepositoryError.invalidModelPath
         }
         return resolved
@@ -137,9 +142,10 @@ nonisolated struct LocalScanRepository: Sendable {
               FileManager.default.fileExists(atPath: resolved.path) else {
             return nil
         }
-        let values = try resolved.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
+        let values = try resolved.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey, .isReadableKey])
         guard values.isRegularFile == true,
               values.isSymbolicLink != true,
+              values.isReadable == true,
               (values.fileSize ?? 0) >= 64,
               try hasUSDZContainerSignature(at: resolved) else {
             return nil
@@ -172,6 +178,14 @@ nonisolated struct LocalScanRepository: Sendable {
             }
         }
         return total
+    }
+
+    func storageBreakdown(diagnosticRootDirectory: URL? = nil) throws -> LocalStorageBreakdown {
+        let diagnosticRoot = try diagnosticRootDirectory ?? LocalStorageUsageCalculator.defaultDiagnosticRoot()
+        return try LocalStorageUsageCalculator().calculate(
+            scanRoot: rootDirectory,
+            diagnosticRoot: diagnosticRoot
+        )
     }
 
     func delete(_ scan: ScanMetadata, keeping remainingScans: [ScanMetadata]) throws {
@@ -247,8 +261,9 @@ nonisolated struct LocalScanRepository: Sendable {
               !relativePath.contains("\\") else {
             throw error
         }
-        let resolved = directory.appending(path: relativePath).standardizedFileURL
-        guard resolved.deletingLastPathComponent() == directory.standardizedFileURL else { throw error }
+        let canonicalDirectory = directory.resolvingSymlinksInPath()
+        let resolved = canonicalDirectory.appending(path: relativePath).standardizedFileURL
+        guard resolved.deletingLastPathComponent() == canonicalDirectory else { throw error }
         return resolved
     }
 }

@@ -7,6 +7,7 @@ struct ScanDetailView: View {
     @State private var showsRename = false
     @State private var showsDeleteConfirmation = false
     @State private var proposedName = ""
+    @State private var modelInfo: ModelFileInfo?
 
     private var scan: ScanMetadata? { library.scans.first { $0.id == scanID } }
 
@@ -61,7 +62,13 @@ struct ScanDetailView: View {
         let modelURL = library.modelURL(for: scan)
         return ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                ScanThumbnail(url: library.previewURL(for: scan), kind: scan.kind)
+                ModelThumbnailView(
+                    scanID: scan.id,
+                    previewURL: library.previewURL(for: scan),
+                    modelURL: modelURL,
+                    kind: scan.kind,
+                    maximumPixelSize: 800
+                )
                     .frame(height: 230)
                     .clipShape(RoundedRectangle(cornerRadius: 22))
 
@@ -71,7 +78,11 @@ struct ScanDetailView: View {
                     detailRow("Updated", value: scan.updatedAt.formatted(date: .long, time: .shortened))
                     if let count = scan.photoCount { detailRow("Original photos", value: "\(count)") }
                     detailRow("Format", value: scan.relativeModelPath == nil ? "No model" : "USDZ")
-                    detailRow("File size", value: scan.fileSizeBytes.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "Unknown")
+                    detailRow("File name", value: modelInfo?.fileName ?? scan.relativeModelPath ?? "Unavailable")
+                    detailRow("File size", value: modelInfo.map { ByteCountFormatter.string(fromByteCount: $0.sizeBytes, countStyle: .file) } ?? "Unknown")
+                    if let modifiedAt = modelInfo?.modifiedAt {
+                        detailRow("File modified", value: modifiedAt.formatted(date: .long, time: .shortened))
+                    }
                     detailRow("Storage", value: "Local on this iPhone")
                 }
                 .studioCard()
@@ -111,6 +122,15 @@ struct ScanDetailView: View {
                 .buttonStyle(.bordered)
             }
             .padding(18)
+        }
+        .task(id: modelURL) {
+            guard let modelURL else {
+                modelInfo = nil
+                return
+            }
+            modelInfo = try? await Task.detached(priority: .utility) {
+                try ModelFileInfo.inspect(modelURL)
+            }.value
         }
     }
 
