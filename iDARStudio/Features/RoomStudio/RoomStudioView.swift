@@ -105,6 +105,7 @@ struct RoomStudioView: View {
                         Text(coordinator.instructionText)
                             .font(.subheadline)
                             .foregroundStyle(.white.opacity(0.82))
+                        roomProgressText
                     }
                     Spacer(minLength: 12)
                 }
@@ -134,6 +135,23 @@ struct RoomStudioView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+
+    @ViewBuilder
+    private var roomProgressText: some View {
+        if let summary = coordinator.liveSummary {
+            Text("Detected: \(summary.walls) walls · \(summary.doors) doors · \(summary.windows) windows · \(summary.objects) objects")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(StudioTheme.accent)
+                .contentTransition(.numericText())
+                .accessibilityLabel(
+                    "Detected \(summary.walls) walls, \(summary.doors) doors, \(summary.windows) windows, and \(summary.objects) objects"
+                )
+        } else if coordinator.lifecycle.phase == .capturing {
+            Text("RoomPlan active · move the phone slowly to detect the first wall")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(StudioTheme.accent)
+        }
     }
 
     private var progressView: some View {

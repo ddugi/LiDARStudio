@@ -14,6 +14,7 @@ final class RoomCaptureCoordinator: NSObject, ObservableObject {
 
     @Published private(set) var lifecycle = RoomCaptureLifecycle()
     @Published private(set) var instructionText = "Move slowly and include every wall and corner."
+    @Published private(set) var liveSummary: Summary?
     @Published private(set) var roomSummary: Summary?
     @Published private(set) var errorMessage: String?
     @Published private(set) var savedScanID: UUID?
@@ -90,6 +91,7 @@ final class RoomCaptureCoordinator: NSObject, ObservableObject {
         }
         guard lifecycle.requestStart() else { return }
         errorMessage = nil
+        liveSummary = nil
         roomSummary = nil
         capturedRoom = nil
         savedScanID = nil
@@ -125,6 +127,7 @@ final class RoomCaptureCoordinator: NSObject, ObservableObject {
         saveTask?.cancel()
         saveTask = nil
         errorMessage = nil
+        liveSummary = nil
         roomSummary = nil
         capturedRoom = nil
         savedScanID = nil
@@ -229,6 +232,27 @@ extension RoomCaptureCoordinator: RoomCaptureSessionDelegate {
             guard let self, self.captureView?.captureSession === session,
                   self.lifecycle.phase == .capturing else { return }
             self.instructionText = instruction.userFacingText
+        }
+    }
+
+    nonisolated func captureSession(
+        _ session: RoomCaptureSession,
+        didUpdate room: CapturedRoom
+    ) {
+        let summary = Summary(
+            walls: room.walls.count,
+            doors: room.doors.count,
+            windows: room.windows.count,
+            objects: room.objects.count
+        )
+        Task { @MainActor [weak self] in
+            guard let self, self.captureView?.captureSession === session,
+                  self.lifecycle.phase == .capturing,
+                  self.liveSummary != summary else { return }
+            self.liveSummary = summary
+            Self.logger.info(
+                "ROOM_GEOMETRY_UPDATED walls=\(summary.walls) doors=\(summary.doors) windows=\(summary.windows) objects=\(summary.objects)"
+            )
         }
     }
 
