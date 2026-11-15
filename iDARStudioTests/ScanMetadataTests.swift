@@ -91,6 +91,26 @@ struct ScanMetadataTests {
         #expect(workflow.stage == .process)
     }
 
+    @Test func captureGuidanceExplicitlyCoversEverySideAndVerticalAngles() {
+        #expect(ObjectCaptureGuideStage.overview.guidance.contains("every side"))
+        #expect(ObjectCaptureGuideStage.detail.guidance.contains("every side"))
+
+        let extraAngleRoute = ObjectCaptureGuideStage.extraAngles.routeSteps
+            .joined(separator: " ")
+            .lowercased()
+        #expect(extraAngleRoute.contains("high orbit"))
+        #expect(extraAngleRoute.contains("low orbit"))
+        #expect(extraAngleRoute.contains("oblique"))
+        #expect(extraAngleRoute.contains("instead of rolling"))
+
+        let allGuidance = ObjectCaptureGuideStage.allCases
+            .flatMap(\.routeSteps)
+            .joined(separator: " ")
+            .lowercased()
+        #expect(!allGuidance.contains("coverage percentage"))
+        #expect(!allGuidance.contains("complete coverage"))
+    }
+
     @Test func freeformGuidanceNeverStartsAFrameworkScanPassOrFinishesAutomatically() {
         var workflow = ObjectCaptureGuideWorkflow()
         workflow.startCapturing()

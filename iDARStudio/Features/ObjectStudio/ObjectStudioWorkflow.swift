@@ -30,11 +30,39 @@ nonisolated enum ObjectCaptureGuideStage: Int, CaseIterable, Equatable, Sendable
 
     var guidance: String {
         switch self {
-        case .overview: "Keep the whole object visible and maintain image overlap."
-        case .detail: "Move closer for detail. Move back if the object loses focus."
-        case .extraAngles: "Capture higher, lower, and oblique views. Move slowly."
+        case .overview: "Level orbit: circle every side with the whole object visible."
+        case .detail: "Detail orbit: move closer and repeat every side with overlap."
+        case .extraAngles: "High orbit, then low orbit. Aim down and up without rolling the phone."
         case .review: "Review the actual captured photos before processing."
         case .process: "Create the model from the preserved original photos."
+        }
+    }
+
+    var routeSteps: [String] {
+        switch self {
+        case .overview:
+            [
+                "Walk one complete level orbit around every side.",
+                "Keep the entire object visible and centered.",
+                "Move slowly and maintain overlap between viewpoints."
+            ]
+        case .detail:
+            [
+                "Repeat a complete orbit closer to the object.",
+                "Capture texture, markings, edges, and small geometry.",
+                "Move back whenever the object becomes soft or leaves the frame."
+            ]
+        case .extraAngles:
+            [
+                "Raise the phone and complete a high orbit angled downward.",
+                "Lower the phone and complete a low orbit angled upward.",
+                "Add oblique views of corners and recessed surfaces.",
+                "Keep the phone upright; change height instead of rolling it sideways."
+            ]
+        case .review:
+            ["Review the real captured images before creating the model."]
+        case .process:
+            ["Create the model from the preserved original photographs."]
         }
     }
 }

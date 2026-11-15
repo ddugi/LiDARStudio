@@ -718,12 +718,19 @@ struct ObjectStudioView: View {
     private var captureHelp: some View {
         NavigationStack {
             List {
-                Label("Keep the object still throughout capture.", systemImage: "hand.raised")
-                Label("Use soft, even light and avoid reflections.", systemImage: "light.max")
-                Label("Move slowly through low, middle, and high angles.", systemImage: "arrow.triangle.2.circlepath")
-                Label("Only the framework photo count is shown; coverage is not estimated.", systemImage: "checkmark.shield")
-                Label("Pause and resume keep the same capture session and saved-photo folder.", systemImage: "pause.circle")
-                Label("Finish & Review is always your explicit choice.", systemImage: "checkmark.circle")
+                Section("Current route: \(coordinator.captureGuideStage.title)") {
+                    ForEach(coordinator.captureGuideStage.routeSteps, id: \.self) { step in
+                        Label(step, systemImage: "arrow.forward.circle")
+                    }
+                }
+                Section("Technique") {
+                    Label("Keep the object still throughout capture.", systemImage: "hand.raised")
+                    Label("Use soft, even light and avoid reflections.", systemImage: "light.max")
+                    Label("Keep the phone upright; move it higher or lower instead of rolling it sideways.", systemImage: "iphone.gen3")
+                    Label("Only the framework photo count is shown; coverage is not estimated.", systemImage: "checkmark.shield")
+                    Label("Pause and resume keep the same capture session and saved-photo folder.", systemImage: "pause.circle")
+                    Label("Finish & Review is always your explicit choice.", systemImage: "checkmark.circle")
+                }
             }
             .navigationTitle("Capture Help")
             .navigationBarTitleDisplayMode(.inline)
