@@ -15,6 +15,7 @@ struct ObjectCaptureMinimalReproApp: App {
 
 struct ReproView: View {
     @StateObject private var coordinator = ReproCoordinator()
+    private let autoStartFreeform = ProcessInfo.processInfo.arguments.contains("--auto-freeform")
 
     var body: some View {
         ZStack {
@@ -38,12 +39,18 @@ struct ReproView: View {
                     Text("One ObjectCaptureSession. No ARView, custom renderer, additional ARSession, reconstruction, storage repository, or production state machine.")
                         .multilineTextAlignment(.center)
                         .foregroundStyle(.secondary)
-                    Button("Create Session", action: coordinator.createSession)
+                    Button("Create Session") {
+                        coordinator.createSession()
+                    }
                         .buttonStyle(.borderedProminent)
                         .disabled(!ObjectCaptureSession.isSupported)
                 }
                 .padding(24)
             }
+        }
+        .task {
+            guard autoStartFreeform else { return }
+            coordinator.createSession(autoStartFreeform: true)
         }
     }
 
@@ -91,9 +98,14 @@ final class ReproCoordinator: ObservableObject {
     private var tasks: [Task<Void, Never>] = []
     private var hasStarted = false
     private var operationInFlight = false
+    private var shouldAutoStartFreeform = false
 
-    func createSession() {
+    func createSession(autoStartFreeform: Bool = false) {
         guard session == nil else { return }
+        shouldAutoStartFreeform = autoStartFreeform
+        if autoStartFreeform {
+            logger.notice("REPRO_AUTO_FREEFORM_REQUESTED")
+        }
         logger.notice("REPRO_CREATE_SESSION")
         let newSession = ObjectCaptureSession()
         session = newSession
@@ -210,6 +222,13 @@ final class ReproCoordinator: ObservableObject {
             operationInFlight = false
             canStartFromReady = true
             status = "Ready"
+            if shouldAutoStartFreeform {
+                shouldAutoStartFreeform = false
+                Task { @MainActor [weak self] in
+                    await Task.yield()
+                    self?.startFreeform()
+                }
+            }
         case .detecting:
             operationInFlight = false
             canStartFromReady = false

@@ -13,4 +13,8 @@ Run only one experiment per launch and stop on the first assertion:
 3. In a separate launch without a supporting plane, tap Detect once.
 4. In a separate launch, tap Freeform once from `Ready`.
 
+For a Freeform experiment without Device Hub screen mirroring, launch the app
+with `--auto-freeform`. The diagnostic creates one session and invokes
+`startCapturing()` once, only after the framework reports `Ready`.
+
 Relevant unified log markers begin with `REPRO_`.
