@@ -61,11 +61,7 @@ struct RoomStudioView: View {
                 .studioCard()
 
                 Button {
-                    Task {
-                        let permission = await CameraPermission.request()
-                        coordinator.cameraPermissionDidChange(permission)
-                        if permission == .authorized { coordinator.prepareToStart() }
-                    }
+                    coordinator.startTapped()
                 } label: {
                     Label(startButtonTitle, systemImage: "camera.viewfinder")
                         .frame(maxWidth: .infinity, minHeight: 48)
@@ -74,6 +70,7 @@ struct RoomStudioView: View {
                 .tint(StudioTheme.accent)
                 .foregroundStyle(.black)
                 .disabled(!capabilities.supportsRoomPlan || CameraPermission.current == .denied)
+                .accessibilityHint("Starts one RoomPlan camera session.")
             }
             .padding(20)
         }

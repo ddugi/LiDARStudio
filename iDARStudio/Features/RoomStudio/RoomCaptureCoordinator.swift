@@ -59,6 +59,25 @@ final class RoomCaptureCoordinator: NSObject, ObservableObject {
         if permission != .authorized { fail("Camera access is required for RoomPlan.") }
     }
 
+    func startTapped() {
+        Self.logger.info("ROOM_START_TAPPED")
+        if CameraPermission.current == .authorized {
+            prepareToStart()
+            return
+        }
+
+        Task { [weak self] in
+            await self?.requestPermissionAndStart()
+        }
+    }
+
+    private func requestPermissionAndStart() async {
+        let permission = await CameraPermission.request()
+        cameraPermissionDidChange(permission)
+        guard permission == .authorized else { return }
+        prepareToStart()
+    }
+
     func prepareToStart() {
         guard CameraPermission.current == .authorized else {
             fail("Camera access is required for RoomPlan.")
